@@ -90,7 +90,7 @@ elif selected_income == "Lage inkomens (< $5k)":
 
 # Kerncijfers van de gekozen selectie
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Aantal analyseerde landen", len(df_year))
+col1.metric("Aantal geanalyseerde landen", len(df_year))
 col2.metric("Gem. hernieuwbare stroom", f"{df_year['renewables_share_elec'].mean():.1f}%" if len(df_year) > 0 else "N/B")
 col3.metric("Gem. CO₂ per inwoner", f"{df_year['co2_per_capita'].mean():.2f} ton" if len(df_year) > 0 else "N/B")
 col4.metric("Gem. GDP per inwoner", f"${df_year['gdp_per_capita'].mean():,.0f}" if len(df_year) > 0 and not df_year['gdp_per_capita'].isna().all() else "N/B")
@@ -101,7 +101,7 @@ st.divider()
 tab1, tab2, tab3, tab4 = st.tabs([
     "1. Environmental Kuznets Curve", 
     "2. Walk vs. Talk (Ontkoppeling)", 
-    "3. Geografisch & Tijdverloop", 
+    "3. Geografisch & Parijs-akkoord", 
     "Data & Methodologie"
 ])
 
@@ -192,7 +192,7 @@ with tab2:
     """)
 
 # -----------------------------------------------------------------------------
-# TAB 3: Geografische Spreiding & Tijdverloop (Hoofdvraag)
+# TAB 3: Geografische Spreiding & Parijs-akkoord
 # -----------------------------------------------------------------------------
 with tab3:
     st.subheader(f"Geografische verdeling van hernieuwbare energie ({selected_year})")
@@ -209,7 +209,13 @@ with tab3:
     
     st.divider()
     
-    st.subheader("Verloop per land over de tijd")
+    # Kopje en toelichting voor het Parijs-akkoord
+    st.subheader("Impact van het Parijs-akkoord (2015) & Tijdverloop per Land")
+    st.write(
+        "In deze grafiek is te analyseren of de overstap naar hernieuwbare energie en de daling van CO₂ per inwoner "
+        "in een specifiek land versnelde na het **Klimaatakkoord van Parijs (2015)**."
+    )
+    
     landen_lijst = sorted(df['country'].unique())
     gekozen_land = st.selectbox("Selecteer een land voor de tijdreeks", landen_lijst, index=landen_lijst.index("Netherlands") if "Netherlands" in landen_lijst else 0)
     
@@ -220,8 +226,9 @@ with tab3:
         x="year",
         y=["renewables_share_elec", "co2_per_capita"],
         labels={"value": "Waarde", "year": "Jaar", "variable": "Variabele"},
-        title=f"Historische ontwikkeling in {gekozen_land}"
+        title=f"Historische ontwikkeling in {gekozen_land} (met markering Parijs-akkoord 2015)"
     )
+    # Blauwe stippellijn en tekst voor het Parijs-akkoord
     fig_line.add_vline(x=2015, line_dash="dot", line_color="blue", annotation_text="Parijs-akkoord (2015)")
     st.plotly_chart(fig_line, use_container_width=True)
 
