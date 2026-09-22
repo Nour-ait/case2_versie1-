@@ -4,11 +4,11 @@ import plotly.express as px
 
 @st.cache_data
 def load_data():
-    # Relatieve paden naar de data-map
+    # Zorg dat 'data/' voor de bestandsnaam staat!
     df_co2 = pd.read_csv('data/annual-co2-emissions-per-country.csv')
     df_ren = pd.read_csv('data/renewable_energy_share_2000_2025.csv')
     
-    # Kolomhernoeming voor CO2 dataset
+    # Hernoem kolommen
     df_co2.rename(columns={
         'Entity': 'country_co2', 
         'Code': 'iso_code', 
@@ -16,11 +16,11 @@ def load_data():
         'Annual CO₂ emissions': 'co2_emissions'
     }, inplace=True)
     
-    # Filteren op geldige ISO3-landcodes (3 letters)
+    # Filter alleen soevereine landen (3-letterige ISO3 codes)
     df_co2_clean = df_co2[df_co2['iso_code'].notna() & (df_co2['iso_code'].str.len() == 3)]
     df_ren_clean = df_ren[df_ren['iso_code'].notna() & (df_ren['iso_code'].str.len() == 3)]
     
-    # Join/Merge op iso_code en year
+    # Merge op ISO-code en jaar
     df = pd.merge(df_co2_clean, df_ren_clean, on=['iso_code', 'year'], how='inner')
     
     # Afgeleide variabelen
@@ -28,5 +28,3 @@ def load_data():
     df['co2_per_capita'] = df['co2_emissions'] / df['population']
     
     return df
-
-df = load_data()
