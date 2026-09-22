@@ -1,19 +1,82 @@
-# 🌍 Klimaatbeleid vs. Werkelijkheid
+# Klimaatbeleid vs. werkelijkheid
 
-Dit dashboard onderzoekt in hoeverre de transitie naar hernieuwbare energie daadwerkelijk leidt tot een daling in CO₂-uitstoot, en hoe dit samenhangt met het inkomensniveau van landen (BBP per capita).
+Interactief Streamlit-dashboard over de relatie tussen CO₂-uitstoot, hernieuwbare
+energie en economische welvaart per land (1990–heden).
 
-## 🚀 Live App
-Bekijk de interactieve applicatie op Streamlit Cloud: [Link naar je app op share.streamlit.io]
+**Onderzoeksvraag:** In hoeverre komt de transitie naar hernieuwbare energie
+daadwerkelijk tot uiting in dalende CO₂-uitstoot, en hoe verhoudt dit zich tot
+het inkomensniveau van landen?
 
-## 📊 Gebruikte Datasets
-1. **CO2 Emissions Across Countries** (Our World in Data)
-2. **Renewable Energy Share 2000-2025** (Our World in Data / Ember / Energy Institute)
+## Databronnen (opgehaald in het script, niet handmatig)
 
-*De data wordt in de app live/automatisch opgehaald via de openbare GitHub/API-bronnen van Our World in Data.*
+| Bron | Ophaalmethode | Gebruikt voor |
+|---|---|---|
+| [OWID CO2-data](https://github.com/owid/co2-data) | `pandas.read_csv(url)` | CO₂-uitstoot, CO₂ per capita |
+| [OWID Energy-data](https://github.com/owid/energy-data) | `pandas.read_csv(url)` | Aandeel hernieuwbare energie, GDP, bevolking |
+| [World Bank API](https://api.worldbank.org/v2/country) | `requests.get()` (JSON) | Inkomensclassificatie per land |
 
-## ⚙️ Lokaal uitvoeren
-Wil je de code lokaal op je eigen computer draaien? Volg deze stappen:
+Join-sleutel: `(iso_code, year)` voor CO2 ↔ Energy, daarna `iso_code` voor de
+inkomensclassificatie. Zie het tabblad **"Data & methode"** in het dashboard
+voor de rij-aantallen voor en na elke join.
 
-1. Kloon deze repository:
+## Lokaal draaien
+
+```bash
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+De app opent op `http://localhost:8501`. De eerste keer duurt het laden iets
+langer omdat de data wordt opgehaald; daarna wordt alles 24 uur gecachet
+(`@st.cache_data`).
+
+## Publiceren op GitHub + Streamlit Community Cloud
+
+1. Maak een nieuwe **publieke** GitHub-repository aan en zet deze map erin:
    ```bash
-   git clone [https://github.com/jouw-gebruikersnaam/jouw-repo.git](https://github.com/jouw-gebruikersnaam/jouw-repo.git)
+   git init
+   git add .
+   git commit -m "Eerste versie dashboard"
+   git branch -M main
+   git remote add origin https://github.com/<jouw-gebruikersnaam>/<repo-naam>.git
+   git push -u origin main
+   ```
+2. Ga naar [share.streamlit.io](https://share.streamlit.io) en log in met je
+   GitHub-account.
+3. Klik **New app**, kies je repository, branch `main` en bestand `app.py`.
+4. Klik **Deploy**. Na een paar minuten krijg je een publieke link
+   (`https://<naam>.streamlit.app`).
+5. Test daarna of een **schone clone** van de repo zonder handmatige stappen
+   werkt — dit is een harde eis van de opdracht.
+
+## Projectstructuur
+
+```
+climate-dashboard/
+├── app.py              # Streamlit-app (5 tabbladen)
+├── data_utils.py        # Data ophalen, opschonen en samenvoegen
+├── requirements.txt
+├── .streamlit/
+│   └── config.toml       # Kleurthema
+└── README.md
+```
+
+## Widgets per tabblad (eis: minimaal 1 slider, 1 checkbox, 1 dropdown)
+
+- **Wereldkaart** — dropdown (indicator) + slider (jaar)
+- **Land over tijd** — dropdown (land) + checkbox (log-schaal) + slider (periode)
+- **GDP vs CO₂** — slider (jaar) + multiselect + checkbox (log-x-as)
+- **Walk vs Talk** — slider (periode) + checkbox (filter)
+
+## Nog te doen voor jouw inlevering
+
+- [ ] Deelvragen expliciet beantwoorden in de presentatie aan de hand van de
+      tabbladen "GDP vs CO₂" (Kuznets-curve) en "Walk vs Talk" (ontkoppeling).
+- [ ] Eigen toelichting/interpretatie van de resultaten toevoegen (tekst in
+      het dashboard of in de presentatie) — de cijfers/analyse zijn nu klaar,
+      de duiding is aan jou.
+- [ ] Dataset-keuze uiterlijk woensdag week 3 melden bij Jerome Mies via Teams.
+- [ ] Broncode die je overneemt (bv. van Streamlit-documentatie) van een
+      bronvermelding voorzien.
