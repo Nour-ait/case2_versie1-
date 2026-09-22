@@ -1,20 +1,32 @@
 """
 app.py
-======
+=======
 Klimaatbeleid vs. werkelijkheid: CO2-uitstoot, hernieuwbare energie en
 economische welvaart per land.
 
-Start lokaal met:
-    streamlit run app.py
+Onderzoeksvraag: In hoeverre komt de transitie naar hernieuwbare energie
+daadwerkelijk tot uiting in dalende CO2-uitstoot, en hoe verhoudt dit zich
+tot het inkomensniveau van landen?
+
+Databronnen (zie data_loader.py voor de exacte endpoints):
+  1. Our World in Data Chart API   -> CO2-uitstoot per land per jaar
+  2. OWID Energy dataset (GitHub)  -> hernieuwbaar-aandeel, GDP, bevolking
+
+Overgenomen/geïnspireerde code:
+  - Plotly Express choropleth-voorbeeld uit de officiële Plotly-documentatie
+    (https://plotly.com/python/choropleth-maps/), aangepast aan onze eigen
+    kolommen en kleurenschaal.
+  - st.cache_data-gebruik volgens het Streamlit-cachingpatroon uit de
+    Streamlit-documentatie (https://docs.streamlit.io/library/advanced-features/caching).
 """
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
-from data_utils import build_merged_dataset, compute_decoupling_table
+from analysis import fit_ekc, walk_vs_talk
+from data_loader import build_dataset
 
 st.set_page_config(
     page_title="Klimaatbeleid vs. werkelijkheid",
@@ -23,261 +35,306 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Data laden (gecachet in data_utils, dus dit is snel na de eerste keer)
+# Data laden
 # ---------------------------------------------------------------------------
-with st.spinner("Data laden..."):
-    data, join_log = build_merged_dataset()
-
-MIN_YEAR = int(data["year"].min())
-MAX_YEAR = int(data["year"].max())
-INCOME_ORDER = ["High income", "Upper middle income", "Lower middle income", "Low income", "Onbekend"]
-INCOME_COLORS = {
-    "High income": "#2E7D32",
-    "Upper middle income": "#F9A825",
-    "Lower middle income": "#EF6C00",
-    "Low income": "#C62828",
-    "Onbekend": "#9E9E9E",
-}
+df, join_log = build_dataset()
 
 st.title("🌍 Klimaatbeleid vs. werkelijkheid")
-st.markdown(
-    "In hoeverre komt de transitie naar hernieuwbare energie daadwerkelijk tot uiting in "
-    "dalende CO₂-uitstoot, en hoe verhoudt dit zich tot het inkomensniveau van landen?"
-)
-
-tab_map, tab_series, tab_ekc, tab_decouple, tab_data = st.tabs(
-    ["🗺️ Wereldkaart", "📈 Land over tijd", "💰 GDP vs CO₂", "🚶 Walk vs Talk", "🔍 Data & methode"]
+st.caption(
+    "De relatie tussen CO2-uitstoot, hernieuwbare energie en economische welvaart per land "
+    f"({join_log['common_year_range'][0]}–{join_log['common_year_range'][1]})"
 )
 
 # ---------------------------------------------------------------------------
-# TAB 1: Wereldkaart
+# Sidebar: interactieve besturing (verplicht: minimaal 1 slider, 1 checkbox, 1 dropdown)
+# ---------------------------------------------------------------------------
+st.sidebar.header("⚙️ Instellingen")
+
+year_min, year_max = join_log["common_year_range"]
+year_range = st.sidebar.slider(
+    "Analyseperiode",
+    min_value=year_min,
+    max_value=year_max,
+    value=(year_min, year_max),
+    help="Filtert alle grafieken en de kaart op deze periode.",
+)
+
+per_capita = st.sidebar.checkbox(
+    "Gebruik CO2 per capita (in plaats van totale uitstoot)",
+    value=True,
+    help="Zet aan om landen fair te vergelijken ongeacht bevolkingsomvang.",
+)
+co2_col = "co2_per_capita_t" if per_capita else "co2_tonnes"
+co2_label = "CO2-uitstoot per capita (ton)" if per_capita else "Totale CO2-uitstoot (ton)"
+
+countries_sorted = sorted(df["country"].dropna().unique())
+highlight_country = st.sidebar.selectbox(
+    "Land om te highlighten",
+    options=countries_sorted,
+    index=countries_sorted.index("Netherlands") if "Netherlands" in countries_sorted else 0,
+    help="Dit land wordt geaccentueerd in de tijdreeks- en Kuznets-grafieken.",
+)
+
+st.sidebar.markdown("---")
+st.sidebar.caption(
+    "Bronnen: Our World in Data — CO2-uitstoot (Global Carbon Project) en "
+    "Energie/GDP/bevolking (Energy Institute, Ember, Maddison Project, World Bank)."
+)
+
+df_period = df[(df.year >= year_range[0]) & (df.year <= year_range[1])].copy()
+
+tab_data, tab_map, tab_walktalk, tab_ekc, tab_compare = st.tabs(
+    ["📥 Data & methode", "🗺️ Wereldkaart", "🚶 Walk vs. Talk", "💰 Kuznets-curve", "⚖️ Landen vergelijken"]
+)
+
+# ---------------------------------------------------------------------------
+# TAB 1 — Data & methode (dataverkenning + join-verantwoording)
+# ---------------------------------------------------------------------------
+with tab_data:
+    st.subheader("Hoe is deze dataset opgebouwd?")
+    st.markdown(
+        """
+        Twee **afzonderlijke** bronnen worden in dit script (niet met de hand) opgehaald en
+        samengevoegd op de sleutel **`iso_code` + `year`** (landcode + jaartal):
+
+        1. **CO2-uitstoot** — Our World in Data Chart API (Global Carbon Project-cijfers, 1750–heden)
+        2. **Hernieuwbare energie, GDP & bevolking** — het OWID *Energy dataset* op GitHub (2000–heden)
+        """
+    )
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("CO2-rijen (ruw)", f"{join_log['co2_rows_raw']:,}")
+    c2.metric("Energie-rijen (ruw)", f"{join_log['energy_rows_raw']:,}")
+    c3.metric("Rijen na merge", f"{join_log['merged_rows']:,}")
+
+    st.markdown("**Waarom deze aantallen niet 1-op-1 overeenkomen — en hoe dat is opgelost:**")
+    st.markdown(
+        f"""
+        - Beide bronnen bevatten naast losse landen ook **regio's/aggregaten** (bv. "Africa",
+          "High-income countries", "World"). Die hebben geen (bruikbare) ISO3-landcode en zijn
+          er daarom uitgefilterd, vóór de merge:
+          CO2 {join_log['co2_rows_raw']:,} → {join_log['co2_rows_countries_only']:,} rijen,
+          Energie {join_log['energy_rows_raw']:,} → {join_log['energy_rows_countries_only']:,} rijen.
+        - De CO2-reeks loopt tot **{year_max}**, de energiereeks vaak nog een paar jaar verder
+          (voorlopige cijfers). De jaartallen zijn daarom **automatisch gelijkgetrokken** op de
+          overlap van beide bronnen: **{join_log['common_year_range'][0]}–{join_log['common_year_range'][1]}**,
+          in plaats van een jaartal hard te coderen — als OWID de data bijwerkt, past de app zich vanzelf aan.
+        - Na het combineren op `iso_code + year` blijven **{join_log['merged_rows']:,} rijen** over
+          (landen × jaren waarvoor **beide** bronnen een waarde hebben). Er gaan dus rijen "verloren"
+          wanneer een land in slechts één van de twee bronnen voorkomt voor een bepaald jaar — dat is
+          het klassieke risico bij een join, en precies waarom we het hier expliciet bijhouden.
+        """
+    )
+
+    st.markdown("**Wat mist er, en wat is (nog) niet mogelijk?**")
+    st.markdown(
+        f"""
+        - GDP ontbreekt voor ongeveer **{join_log['rows_missing_gdp_pct']:.0%}** van de rijen
+          (vooral kleine (eiland)staten en de allerlaatste jaren, omdat GDP-cijfers met vertraging
+          verschijnen). Grafieken die GDP gebruiken (de Kuznets-curve) laten die rijen automatisch weg.
+        - Het aandeel hernieuwbare energie ontbreekt voor ongeveer
+          **{join_log['rows_missing_renewables_pct']:.0%}** van de rijen.
+        - De inkomensgroep-indeling hieronder is een **zelf afgeleide** kwartielindeling op basis van
+          gemiddelde GDP per capita — géén officiële Wereldbank-classificatie. Voor landen zonder
+          GDP-cijfer kan dus ook geen inkomensgroep bepaald worden.
+        - Uitspraken over oorzaak-gevolg zijn met deze data niet mogelijk: het dashboard toont
+          **correlaties en trends**, geen bewezen causale effecten van beleid op uitstoot.
+        """
+    )
+
+    st.markdown("**Voorbeeld van de samengevoegde tabel:**")
+    st.dataframe(
+        df_period[
+            ["country", "year", "co2_tonnes", "co2_per_capita_t", "renewables_share_energy",
+             "gdp_per_capita", "income_group"]
+        ].sort_values(["country", "year"]).head(200),
+        use_container_width=True,
+    )
+
+# ---------------------------------------------------------------------------
+# TAB 2 — Wereldkaart
 # ---------------------------------------------------------------------------
 with tab_map:
     st.subheader("Wereldkaart per jaar")
+    map_metric = st.selectbox(
+        "Kies een variabele voor de kaart",
+        options=[co2_label, "Aandeel hernieuwbare energie (%)", "GDP per capita (US$)"],
+        key="map_metric",
+    )
+    map_year = st.slider("Jaar", min_value=year_range[0], max_value=year_range[1], value=year_range[1])
 
-    col_a, col_b = st.columns([1, 3])
-    with col_a:
-        map_metric = st.selectbox(  # dropdown
-            "Indicator",
-            options=["co2_per_capita", "renewables_share_energy", "gdp_per_capita"],
-            format_func=lambda x: {
-                "co2_per_capita": "CO₂-uitstoot per capita (ton)",
-                "renewables_share_energy": "Aandeel hernieuwbare energie (%)",
-                "gdp_per_capita": "GDP per capita ($)",
-            }[x],
-            key="map_metric",
-        )
-        map_year = st.slider("Jaar", MIN_YEAR, MAX_YEAR, value=MAX_YEAR, key="map_year")  # slider
+    metric_col = {
+        co2_label: co2_col,
+        "Aandeel hernieuwbare energie (%)": "renewables_share_energy",
+        "GDP per capita (US$)": "gdp_per_capita",
+    }[map_metric]
 
-    map_df = data[data["year"] == map_year].dropna(subset=[map_metric])
-    fig_map = px.choropleth(
+    map_df = df[df.year == map_year].dropna(subset=[metric_col])
+    fig = px.choropleth(
         map_df,
         locations="iso_code",
-        color=map_metric,
+        color=metric_col,
         hover_name="country",
-        color_continuous_scale="RdYlGn_r" if map_metric != "renewables_share_energy" else "RdYlGn",
-        projection="natural earth",
-        title=f"{map_year}",
+        color_continuous_scale="YlOrRd" if "co2" in metric_col else "Greens",
+        labels={metric_col: map_metric},
+        title=f"{map_metric} — {map_year}",
     )
-    fig_map.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=520)
-    st.plotly_chart(fig_map, use_container_width=True)
-
-# ---------------------------------------------------------------------------
-# TAB 2: Tijdreeks per land
-# ---------------------------------------------------------------------------
-with tab_series:
-    st.subheader("CO₂-uitstoot en hernieuwbare energie door de tijd")
-
-    countries_sorted = sorted(data["country"].dropna().unique())
-    default_idx = countries_sorted.index("Netherlands") if "Netherlands" in countries_sorted else 0
-
-    col_a, col_b = st.columns([1, 1])
-    with col_a:
-        country = st.selectbox("Land", countries_sorted, index=default_idx, key="series_country")  # dropdown
-    with col_b:
-        log_scale = st.checkbox("Logaritmische schaal voor CO₂", value=False, key="series_log")  # checkbox
-
-    year_range = st.slider(  # slider
-        "Periode", MIN_YEAR, MAX_YEAR, value=(max(MIN_YEAR, 2000), MAX_YEAR), key="series_years"
-    )
-
-    c_df = data[(data["country"] == country) & data["year"].between(*year_range)].sort_values("year")
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=c_df["year"], y=c_df["co2_per_capita"], name="CO₂ per capita (ton)",
-            line=dict(color="#C62828"), yaxis="y1",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=c_df["year"], y=c_df["renewables_share_energy"], name="Aandeel hernieuwbaar (%)",
-            line=dict(color="#2E7D32"), yaxis="y2",
-        )
-    )
-    fig.update_layout(
-        title=f"{country}: CO₂ per capita vs. aandeel hernieuwbare energie",
-        xaxis=dict(title="Jaar"),
-        yaxis=dict(title="CO₂ per capita (ton)", type="log" if log_scale else "linear"),
-        yaxis2=dict(title="Aandeel hernieuwbaar (%)", overlaying="y", side="right", range=[0, 100]),
-        legend=dict(orientation="h", y=1.12),
-        height=500,
-    )
+    fig.update_layout(margin=dict(l=0, r=0, t=40, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
-    if c_df.empty:
-        st.info("Geen data voor dit land in deze periode.")
+# ---------------------------------------------------------------------------
+# TAB 3 — Walk vs. Talk
+# ---------------------------------------------------------------------------
+with tab_walktalk:
+    st.subheader("Welke landen 'walk the talk', en welke praten er vooral over?")
+    st.caption(
+        "Vergelijkt per land het begin- en eindjaar van de gekozen periode: is het "
+        "aandeel hernieuwbare energie gestegen, én is de CO2-uitstoot daadwerkelijk gedaald?"
+    )
+    threshold_pp = st.slider(
+        "Drempel: minimale stijging in hernieuwbaar-aandeel (procentpunt) om als 'transitie' te tellen",
+        min_value=0,
+        max_value=30,
+        value=5,
+        help="Landen met minder groei dan dit worden geclassificeerd als 'geen transitie'.",
+    )
+
+    wt = walk_vs_talk(df_period, co2_col=co2_col, threshold_pp=threshold_pp)
+
+    if wt.empty:
+        st.info("Niet genoeg data in de gekozen periode voor deze analyse.")
+    else:
+        counts = wt["category"].value_counts().reindex(
+            ["Walk the talk", "Talk, geen walk", "Geen transitie"], fill_value=0
+        )
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            fig_bar = px.bar(
+                counts, orientation="h",
+                labels={"value": "Aantal landen", "index": ""},
+                color=counts.index,
+                color_discrete_map={
+                    "Walk the talk": "#2ca02c",
+                    "Talk, geen walk": "#ff7f0e",
+                    "Geen transitie": "#7f7f7f",
+                },
+                title="Aantal landen per categorie",
+            )
+            fig_bar.update_layout(showlegend=False)
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        with col_b:
+            fig_scatter = px.scatter(
+                wt, x="delta_renewables_pp", y="delta_co2",
+                color="category", hover_name="country",
+                labels={
+                    "delta_renewables_pp": "Δ aandeel hernieuwbaar (procentpunt)",
+                    "delta_co2": f"Δ {co2_label}",
+                },
+                color_discrete_map={
+                    "Walk the talk": "#2ca02c",
+                    "Talk, geen walk": "#ff7f0e",
+                    "Geen transitie": "#7f7f7f",
+                },
+                title="Verandering in hernieuwbaar-aandeel vs. verandering in CO2",
+            )
+            fig_scatter.add_hline(y=0, line_dash="dot", line_color="gray")
+            fig_scatter.add_vline(x=threshold_pp, line_dash="dot", line_color="gray")
+            if highlight_country in wt.country.values:
+                hc = wt[wt.country == highlight_country].iloc[0]
+                fig_scatter.add_annotation(
+                    x=hc.delta_renewables_pp, y=hc.delta_co2, text=highlight_country,
+                    showarrow=True, arrowhead=2,
+                )
+            st.plotly_chart(fig_scatter, use_container_width=True)
+
+        st.markdown(f"**Landen die écht 'walk the talk' laten zien ({co2_label.lower()} daalde):**")
+        st.dataframe(
+            wt[wt.category == "Walk the talk"].sort_values("delta_co2").reset_index(drop=True),
+            use_container_width=True,
+        )
 
 # ---------------------------------------------------------------------------
-# TAB 3: GDP vs CO2 (Environmental Kuznets Curve)
+# TAB 4 — Environmental Kuznets Curve
 # ---------------------------------------------------------------------------
 with tab_ekc:
-    st.subheader("Environmental Kuznets Curve: GDP per capita vs. CO₂ per capita")
+    st.subheader("Environmental Kuznets Curve: stijgt CO2 mee met welvaart, of vlakt het af?")
+    show_fit = st.checkbox("Toon kwadratische regressie-fit (EKC-model)", value=True)
+    income_options = ["Alle"] + [g for g in
+        ["Laag inkomen", "Lager-midden inkomen", "Hoger-midden inkomen", "Hoog inkomen"]
+        if g in df_period.income_group.dropna().unique()]
+    income_choice = st.selectbox("Filter op inkomensgroep", options=income_options)
 
-    col_a, col_b, col_c = st.columns([1, 1, 1])
-    with col_a:
-        ekc_year = st.slider("Jaar", MIN_YEAR, MAX_YEAR, value=MAX_YEAR, key="ekc_year")  # slider
-    with col_b:
-        income_filter = st.multiselect(
-            "Inkomensgroep", options=INCOME_ORDER, default=INCOME_ORDER, key="ekc_income"
-        )
-    with col_c:
-        log_x = st.checkbox("Logaritmische x-as (GDP)", value=True, key="ekc_logx")  # checkbox
-
-    ekc_df = data[
-        (data["year"] == ekc_year)
-        & data["income_group"].isin(income_filter)
-    ].dropna(subset=["gdp_per_capita", "co2_per_capita", "population"])
+    ekc_df = df_period.dropna(subset=["gdp_per_capita", co2_col])
+    if income_choice != "Alle":
+        ekc_df = ekc_df[ekc_df.income_group == income_choice]
 
     fig_ekc = px.scatter(
-        ekc_df,
-        x="gdp_per_capita",
-        y="co2_per_capita",
-        size="population",
-        color="income_group",
-        color_discrete_map=INCOME_COLORS,
-        hover_name="country",
-        log_x=log_x,
-        size_max=45,
-        labels={"gdp_per_capita": "GDP per capita ($)", "co2_per_capita": "CO₂ per capita (ton)"},
-        title=f"GDP per capita vs. CO₂ per capita ({ekc_year})",
+        ekc_df, x="gdp_per_capita", y=co2_col, color="income_group",
+        hover_name="country", log_x=True, opacity=0.55,
+        labels={"gdp_per_capita": "GDP per capita (US$, log-schaal)", co2_col: co2_label},
+        title="GDP per capita vs. CO2-uitstoot",
     )
 
-    # Kwadratische trendlijn (proxy voor een Kuznets-curve) over alle punten
-    fit_df = ekc_df.dropna(subset=["gdp_per_capita", "co2_per_capita"])
-    if len(fit_df) > 10:
-        x = np.log10(fit_df["gdp_per_capita"]) if log_x else fit_df["gdp_per_capita"]
-        coeffs = np.polyfit(x, fit_df["co2_per_capita"], 2)
-        x_line = np.linspace(x.min(), x.max(), 100)
-        y_line = np.polyval(coeffs, x_line)
-        x_line_plot = 10 ** x_line if log_x else x_line
-        fig_ekc.add_trace(
-            go.Scatter(
-                x=x_line_plot, y=y_line, mode="lines", name="Kwadratisch fit (EKC-proxy)",
-                line=dict(color="black", dash="dash"),
+    x_grid, y_pred, coeffs = fit_ekc(ekc_df, x_col="gdp_per_capita", y_col=co2_col)
+    if show_fit and x_grid is not None:
+        fig_ekc.add_scatter(x=x_grid, y=y_pred, mode="lines", name="Kwadratische fit",
+                             line=dict(color="black", width=3, dash="dash"))
+        a, b, c = coeffs
+        top_x = -b / (2 * a) if a != 0 else None
+        if a < 0 and top_x is not None and x_grid.min() < top_x < x_grid.max():
+            st.info(
+                f"De fit piekt bij ongeveer **${top_x:,.0f} GDP per capita** en daalt daarna — "
+                "dat is het klassieke Kuznets-patroon (eerst stijgen, dan dalen)."
             )
+        elif a > 0:
+            st.info("De fit buigt omhoog: in deze selectie stijgt CO2 juist versneld mee met welvaart — geen (klassieke) Kuznets-curve.")
+        else:
+            st.info("Geen duidelijke piek binnen het waargenomen GDP-bereik van deze selectie.")
+
+    if highlight_country in ekc_df.country.values:
+        hc_df = ekc_df[ekc_df.country == highlight_country]
+        fig_ekc.add_scatter(
+            x=hc_df.gdp_per_capita, y=hc_df[co2_col], mode="markers",
+            marker=dict(color="red", size=10, symbol="star"), name=highlight_country,
         )
-    fig_ekc.update_layout(height=550)
     st.plotly_chart(fig_ekc, use_container_width=True)
-    st.caption(
-        "De stippellijn is een kwadratische regressie door de data, als indicatieve proxy voor "
-        "een Environmental Kuznets Curve (stijging gevolgd door afvlakking/daling). "
-        "Bolgrootte = bevolkingsomvang."
-    )
 
 # ---------------------------------------------------------------------------
-# TAB 4: Walk vs Talk
+# TAB 5 — Landen vergelijken
 # ---------------------------------------------------------------------------
-with tab_decouple:
-    st.subheader("Welke landen laten écht ontkoppeling zien?")
-
-    col_a, col_b = st.columns([1, 1])
-    with col_a:
-        d_start, d_end = st.slider(  # slider
-            "Vergelijk periode", MIN_YEAR, MAX_YEAR, value=(2010, min(2023, MAX_YEAR)), key="decouple_years"
-        )
-    with col_b:
-        only_growing_renewables = st.checkbox(  # checkbox
-            "Toon alleen landen met groeiend aandeel hernieuwbaar", value=False, key="decouple_filter"
-        )
-
-    decouple_df = compute_decoupling_table(data, d_start, d_end)
-    if only_growing_renewables:
-        decouple_df = decouple_df[decouple_df["delta_renewables_pp"] > 0]
-
-    fig_dec = px.scatter(
-        decouple_df,
-        x="delta_renewables_pp",
-        y="delta_co2_per_capita",
-        color="categorie",
-        hover_name="country",
-        labels={
-            "delta_renewables_pp": "Verandering aandeel hernieuwbaar (procentpunt)",
-            "delta_co2_per_capita": "Verandering CO₂ per capita (ton)",
-        },
-        title=f"Verandering {d_start}–{d_end}: hernieuwbaar-aandeel vs. CO₂ per capita",
+with tab_compare:
+    st.subheader("Landen naast elkaar door de tijd")
+    compare_countries = st.multiselect(
+        "Kies 2 tot 5 landen om te vergelijken",
+        options=countries_sorted,
+        default=[c for c in ["Netherlands", "Germany", "China", "India"] if c in countries_sorted][:4],
+        max_selections=5,
     )
-    fig_dec.add_hline(y=0, line_dash="dot", line_color="gray")
-    fig_dec.add_vline(x=0, line_dash="dot", line_color="gray")
-    fig_dec.update_layout(height=520)
-    st.plotly_chart(fig_dec, use_container_width=True)
+    cmp_df = df_period[df_period.country.isin(compare_countries)]
 
-    st.markdown("**Ranking — grootste dalers in CO₂ per capita mét renewable-groei ('walk the talk'):**")
-    walkers = decouple_df[decouple_df["categorie"] == "Walk (ontkoppeling)"].sort_values("delta_co2_per_capita")
-    st.dataframe(
-        walkers[["country", "income_group", "delta_renewables_pp", "delta_co2_per_capita"]].head(15),
-        use_container_width=True,
-        hide_index=True,
-    )
+    if len(compare_countries) < 2:
+        st.info("Selecteer minstens 2 landen.")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            fig1 = px.line(
+                cmp_df, x="year", y="renewables_share_energy", color="country",
+                labels={"renewables_share_energy": "Aandeel hernieuwbaar (%)", "year": "Jaar"},
+                title="Aandeel hernieuwbare energie over tijd",
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+        with col2:
+            fig2 = px.line(
+                cmp_df, x="year", y=co2_col, color="country",
+                labels={co2_col: co2_label, "year": "Jaar"},
+                title=f"{co2_label} over tijd",
+            )
+            st.plotly_chart(fig2, use_container_width=True)
 
-# ---------------------------------------------------------------------------
-# TAB 5: Data & methode
-# ---------------------------------------------------------------------------
-with tab_data:
-    st.subheader("Dataverkenning en methodeverantwoording")
-
-    st.markdown("### Bronnen")
-    st.markdown(
-        "- **CO2-uitstoot per land** — `annual-co2-emissions-per-country.csv` (Our World in Data / "
-        "Global Carbon Project), opgehaald via een publieke URL met `requests`/`pandas.read_csv`.\n"
-        "- **Hernieuwbare energie, GDP en bevolking** — `renewable_energy_share_2000_2025.csv` "
-        "(Our World in Data / Ember), opgehaald via dezelfde methode.\n"
-        "- **Inkomensgroep** wordt zelf berekend uit GDP per capita met de Wereldbank-drempels "
-        "(High / Upper middle / Lower middle / Low income) — geen aparte API nodig hiervoor."
-    )
-
-    st.markdown("### Join-logging")
-    st.json(join_log)
-    st.caption(
-        "De twee bestanden zijn samengevoegd op sleutel (iso_code, year) met een inner join. "
-        "Het CO2-bestand loopt tot en met "
-        f"{join_log['co2_laatste_jaar']}, dus de samengevoegde data stopt automatisch bij "
-        f"{join_log['laatste_jaar_in_gecombineerde_data']} — ook al bevat het energie-bestand "
-        f"nieuwere jaren tot {join_log['energy_laatste_jaar']}."
-    )
-
-    st.markdown("### Ontbrekende waarden (na opschonen)")
-    missing = data[["co2_per_capita", "renewables_share_energy", "gdp_per_capita", "income_group"]].isna().mean() * 100
-    st.dataframe(missing.round(1).rename("% ontbrekend").to_frame(), use_container_width=True)
-
-    st.markdown("### Beschrijvende statistiek")
-    st.dataframe(
-        data[["co2_per_capita", "renewables_share_energy", "gdp_per_capita"]].describe().round(2),
-        use_container_width=True,
-    )
-
-    st.markdown("### Wat we hebben opgeschoond")
-    st.markdown(
-        "- Regio's/werelddeel-aggregaten zonder landcode (zoals 'World', 'Africa', 'European Union', "
-        "'High-income countries') zijn verwijderd uit beide bestanden — dit zijn geen landen en zouden "
-        "de landenvergelijking vervuilen (dubbeltellingen).\n"
-        "- `renewables_share_energy` buiten het bereik 0–100% is als ontbrekend gemarkeerd (onmogelijke waarde).\n"
-        "- Negatieve `co2_per_capita` en `gdp_per_capita` (of nul/negatieve GDP) zijn als ontbrekend gemarkeerd.\n"
-        "- De dataset stopt bij het laatste jaar waarin *beide* bestanden data hebben "
-        f"({join_log['laatste_jaar_in_gecombineerde_data']}) — recentere renewable-cijfers zonder "
-        "bijbehorende CO2-cijfers worden dus niet getoond, om geen appels met peren te vergelijken."
-    )
-
-    with st.expander("Voorbeeld van de samengevoegde data"):
-        st.dataframe(data.sample(min(20, len(data))), use_container_width=True)
+st.markdown("---")
+st.caption(
+    "Bronnen: Global Carbon Project via Our World in Data (CO2); "
+    "Energy Institute, Ember, Maddison Project Database & World Bank via Our World in Data "
+    "(energie, GDP, bevolking). Alle brondata: CC BY 4.0."
+)

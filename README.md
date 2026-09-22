@@ -1,153 +1,122 @@
-# Klimaatbeleid vs. werkelijkheid
+# Klimaatbeleid vs. werkelijkheid 🌍
 
-Interactief Streamlit-dashboard over de relatie tussen CO₂-uitstoot, hernieuwbare
-energie en economische welvaart per land (2000–2022).
+Streamlit-dashboard voor de case *Analytics* (Introduction to Data Science / Visual Analytics).
 
-**Onderzoeksvraag:** In hoeverre komt de transitie naar hernieuwbare energie
-daadwerkelijk tot uiting in dalende CO₂-uitstoot, en hoe verhoudt dit zich tot
-het inkomensniveau van landen?
+**Onderzoeksvraag:** In hoeverre komt de transitie naar hernieuwbare energie daadwerkelijk tot
+uiting in dalende CO2-uitstoot, en hoe verhoudt dit zich tot het inkomensniveau van landen?
 
-## Databronnen
+**Deelvragen:**
+- Welke landen laten een reële ontkoppeling zien tussen groei in hernieuwbare energie en
+  daling van CO2-uitstoot ("walk"), en welke blijven vooral bij beleidsintenties ("talk")?
+- Is er bewijs voor een *Environmental Kuznets Curve* (CO2 stijgt mee met GDP per capita tot
+  een bepaald niveau, en vlakt daarna af of daalt)?
+- Hoe verschilt dit patroon tussen rijke, opkomende en arme landen?
 
-Alleen de twee aangeleverde bestanden worden gebruikt:
+## Databronnen (opgehaald via een openbare API/bron, niet met de hand gedownload)
 
-| Bestand | Bron | Gebruikt voor |
-|---|---|---|
-| `data/annual-co2-emissions-per-country.csv` | Our World in Data / Global Carbon Project | CO₂-uitstoot per land per jaar |
-| `data/renewable_energy_share_2000_2025.csv` | Our World in Data / Ember | Aandeel hernieuwbare energie, GDP, bevolking |
+| # | Data | Bron | Endpoint |
+|---|------|------|----------|
+| 1 | CO2-uitstoot per land per jaar | Our World in Data **Chart API** (officiële, gedocumenteerde publieke API — voeg `.csv` toe aan elke grapher-URL) | `https://ourworldindata.org/grapher/annual-co2-emissions-per-country.csv` |
+| 2 | Hernieuwbaar-aandeel, GDP, bevolking | OWID **Energy dataset** (publiek, CC BY 4.0, dagelijks automatisch bijgewerkt) op GitHub | `https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv` |
 
-Inkomensgroep (rijk / opkomend / arm) wordt zelf berekend uit GDP per capita
-met de standaard Wereldbank-drempels — hier géén losse API voor nodig.
+> ⚠️ **Belangrijk voor de beoordeling:** de opdracht eist expliicit dat je de data ophaalt via
+> een **openbare API**, niet met de hand gedownload bestanden. Kaggle-CSV's die je zelf
+> download (zoals de twee bestanden die als vertrekpunt zijn gebruikt om deze case te
+> verkennen) voldoen daar **niet** aan. Dit dashboard haalt daarom bij het opstarten dezelfde
+> data live op bij de oorspronkelijke bron (Our World in Data) via de URL's hierboven — de
+> inhoud is (op de laatste bijgewerkte jaren na) identiek aan de Kaggle-bestanden, omdat die
+> daar simpelweg een kopie van zijn. Zie `data_loader.py` voor de details en bronvermelding.
 
-### Hoe dit aan de "openbare API"-eis voldoet
+Beide bronnen zijn **twee volledig gescheiden bestanden**, samengevoegd op de sleutel
+`iso_code` (landcode) + `year` — dat voldoet aan de eis "je voegt twee tabellen samen die niet
+uit hetzelfde bestand komen".
 
-De opdracht eist: *"Haal de data in je script op, niet met de hand
-gedownload, zodat iemand anders je dataset kan reproduceren."* Dit dashboard
-lost dat zo op:
+### Join-verantwoording (rijaantallen voor/na)
 
-1. De twee CSV's staan in de map `data/` in deze repo.
-2. In `data_utils.py` vul je `RAW_BASE_URL` in met de raw-GitHub-link naar
-   jouw eigen, gepushte repo, bijvoorbeeld:
-   ```python
-   RAW_BASE_URL = "https://raw.githubusercontent.com/<gebruikersnaam>/<repo>/main/data"
-   ```
-3. Het script probeert dan bij elke run eerst die publieke URL op te halen
-   (`requests.get`). Dat maakt het reproduceerbaar: wie de repo kloont en
-   `streamlit run app.py` doet, krijgt automatisch dezelfde data — zonder dat
-   ze iets handmatig hoeven te downloaden. Lukt het ophalen niet (bijv. tijdens
-   lokaal ontwikkelen vóórdat je gepusht hebt), dan valt het script terug op
-   het lokale bestand in `data/`.
+Wordt live getoond in het tabblad **"📥 Data & methode"** van het dashboard zelf (met exacte
+aantallen), inclusief:
+- hoeveel rijen wegvallen omdat het aggregaten/regio's zijn (bv. "Africa", "World") in plaats
+  van losse landen;
+- hoe de jaartallen van beide bronnen automatisch gelijk worden getrokken (de CO2-reeks stopt
+  eerder dan de energiereeks — de app neemt dynamisch de overlap, in plaats van een hard
+  gecodeerd jaartal);
+- hoeveel rijen overblijven na de merge, en hoeveel % van GDP/hernieuwbaar-aandeel ontbreekt.
 
-⚠️ **Let op:** dit is een CSV-bestand via een publieke URL, geen "echte"
-REST/JSON-API zoals de Wereldbank-API die er eerder in zat. Voor puur
-CSV-bronnen is dit in de praktijk gangbaar, maar controleer bij je docent
-(Jerome Mies) of dit voor jullie cursus als "openbare API" telt, of dat er
-een JSON-API vereist is. Zo niet, dan is de eenvoudigste fix om er een
-tweede, JSON-gebaseerde bron bij te zoeken (bijv. de Wereldbank-API voor
-inkomensclassificatie) — laat het weten en ik zet die er zo weer bij.
+## Structuur van dit project
 
-## Waarom de data bij 2022 stopt
-
-`annual-co2-emissions-per-country.csv` loopt tot en met **2022** — de laatste
-jaargang die het Global Carbon Project publiceert. Het renewable-bestand
-loopt door tot 2025, maar de `gdp`-kolom daarin stopt óók al bij 2022. Omdat
-CO₂ en renewables op jaartal worden samengevoegd (inner join), valt alles na
-2022 automatisch weg. Dit is geen fout — het is de laatst beschikbare
-jaargang waarin beide databronnen overlappen. Zie het tabblad
-**"Data & methode"** in het dashboard voor de exacte jaartallen en
-rij-aantallen.
-
-## Join-logica
-
-De twee bestanden worden samengevoegd op sleutel **(iso_code, year)** met een
-inner join. Rij-aantallen voor en na de join, en de laatste beschikbare
-jaartallen per bestand, worden gelogd en getoond in het tabblad
-"Data & methode" — zoals de opdracht vraagt.
+```
+.
+├── app.py                  # Streamlit-app (UI, tabs, interactie)
+├── data_loader.py           # Ophalen bij de bron + samenvoegen + opschonen
+├── analysis.py               # Walk-vs-talk classificatie + EKC-regressie
+├── requirements.txt
+├── .streamlit/config.toml    # Kleurthema
+└── README.md
+```
 
 ## Lokaal draaien
 
 ```bash
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+git clone <jouw-repo-url>
+cd <repo-map>
+python3 -m venv .venv && source .venv/bin/activate   # optioneel
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-De app opent op `http://localhost:8501`.
+De app heeft een internetverbinding nodig (om de data bij Our World in Data op te halen) maar
+verder geen extra configuratie, API-key of handmatige stap.
 
-## Publiceren op GitHub + Streamlit Community Cloud
+## Live publiceren via Streamlit Community Cloud
 
-1. Maak een nieuwe **publieke** GitHub-repository en zet deze hele map erin
-   (inclusief de `data/`-map met de twee CSV's):
-   ```bash
-   git init
-   git add .
-   git commit -m "Eerste versie dashboard"
-   git branch -M main
-   git remote add origin https://github.com/<jouw-gebruikersnaam>/<repo-naam>.git
-   git push -u origin main
-   ```
-2. Vul daarna `RAW_BASE_URL` in `data_utils.py` in met je eigen repo-link
-   (zie hierboven) en commit die wijziging.
-3. Ga naar [share.streamlit.io](https://share.streamlit.io), log in met je
-   GitHub-account, klik **New app**, kies je repo/branch/`app.py` en klik
-   **Deploy**.
-4. Test daarna of een **schone clone** van de repo zonder handmatige stappen
-   werkt — dit is een harde eis van de opdracht.
+1. Push deze map naar een **publieke GitHub-repository**.
+2. Ga naar [share.streamlit.io](https://share.streamlit.io) en log in met je GitHub-account.
+3. Klik op **"New app"**, kies je repo/branch en zet **Main file path** op `app.py`.
+4. Klik op **Deploy**. Na een paar minuten is de app publiek bereikbaar via een `*.streamlit.app`-link.
+5. Zet die link (en je repo-link) in je Teams-melding / presentatie.
 
-## Projectstructuur
+Een schone `git clone` + de bovenstaande stappen zijn voldoende — er is geen los databestand
+nodig, want alles wordt in `data_loader.py` bij de bron opgehaald.
 
-```
-climate-dashboard/
-├── app.py                  # Streamlit-app (5 tabbladen)
-├── data_utils.py            # Data ophalen, opschonen en samenvoegen
-├── data/
-│   ├── annual-co2-emissions-per-country.csv
-│   └── renewable_energy_share_2000_2025.csv
-├── requirements.txt
-├── .streamlit/
-│   └── config.toml           # Kleurthema
-└── README.md
-```
+## Interactieve elementen in het dashboard
 
-## Widgets per tabblad (eis: minimaal 1 slider, 1 checkbox, 1 dropdown)
+| Element | Locatie | Koppeling |
+|---|---|---|
+| **Slider** — analyseperiode | Sidebar | Filtert alle tabs |
+| **Slider** — jaar op de kaart | Wereldkaart | Bepaalt welk jaar de choropleth toont |
+| **Slider** — walk/talk-drempel | Walk vs. Talk | Bepaalt de classificatie-grens |
+| **Checkbox** — CO2 per capita aan/uit | Sidebar | Wisselt de metric in alle grafieken |
+| **Checkbox** — EKC-fit tonen | Kuznets-curve | Toont/verbergt de kwadratische regressielijn |
+| **Dropdown** — land highlighten | Sidebar | Accentueert een land in de scatter/tijdreeks-grafieken |
+| **Dropdown** — kaart-variabele | Wereldkaart | Wisselt tussen CO2, hernieuwbaar-aandeel, GDP |
+| **Dropdown** — inkomensgroep-filter | Kuznets-curve | Filtert de scatterplot op inkomensgroep |
+| **Multiselect** — landen vergelijken | Landen vergelijken | Kiest welke landen in de tijdreeksen staan |
 
-- **Wereldkaart** — dropdown (indicator) + slider (jaar)
-- **Land over tijd** — dropdown (land) + checkbox (log-schaal) + slider (periode)
-- **GDP vs CO₂** — slider (jaar) + multiselect + checkbox (log-x-as)
-- **Walk vs Talk** — slider (periode) + checkbox (filter)
+## Analyse / afgeleide variabelen
 
-## Hoe dit aan de rubric voldoet
+- `co2_per_capita_t` = CO2-uitstoot ÷ bevolking
+- `gdp_per_capita` = GDP ÷ bevolking
+- `income_group` = eigen kwartiel-indeling (Laag / Lager-midden / Hoger-midden / Hoog inkomen)
+  op basis van gemiddelde GDP per capita per land — **geen** officiële Wereldbank-classificatie,
+  wat expliciet zo benoemd wordt in de app.
+- Walk-vs-talk classificatie: vergelijkt de verandering in hernieuwbaar-aandeel met de
+  verandering in CO2 tussen begin- en eindjaar van de gekozen periode (`analysis.py`).
+- Kwadratische regressie (`numpy.polyfit`, graad 2) van CO2 per capita op GDP per capita, als
+  eenvoudig model om de Environmental Kuznets Curve te toetsen.
 
-**Introduction to Data Science**
-- *Dataverzameling*: twee losse bronnen, opgehaald via een publieke URL in het
-  script (zie hierboven), samengevoegd op `(iso_code, year)`.
-- *Data verkenning*: tabblad "Data & methode" toont join-logging, % missende
-  waarden, beschrijvende statistiek en welke opschoonstappen zijn toegepast
-  en waarom (regio-aggregaten, onmogelijke percentages, ontbrekend GDP).
-- *Analyse*: afgeleide variabelen (CO₂ per capita, GDP per capita), een
-  kwadratische regressie als EKC-proxy, en een zelfgemaakte decoupling-
-  classificatie per land (Walk/Talk).
+## Bronvermelding overgenomen code
 
-**Visual Analytics**
-- *Opbouw en verhaallijn*: de tabbladen volgen de opbouw van je
-  onderzoeksvraag naar je drie deelvragen (wereldbeeld → per land →
-  GDP-relatie → walk-vs-talk-ranking).
-- *Interactiviteit*: dropdowns, sliders, checkboxes en een multiselect,
-  allemaal gekoppeld aan een visualisatie.
-- *Vergelijken en annoteren*: kleurcodering op inkomensgroep, referentielijnen
-  op nul in de walk/talk-scatter, EKC-trendlijn.
-- *Dashboardontwerp*: consistente kleuren, duidelijke titels en assen,
-  tooltips via Plotly.
+- Plotly Express choropleth-opzet: aangepast van het officiële voorbeeld op
+  [plotly.com/python/choropleth-maps](https://plotly.com/python/choropleth-maps/).
+- `st.cache_data`-gebruik: volgens het cachingpatroon uit de
+  [Streamlit-documentatie](https://docs.streamlit.io/library/advanced-features/caching).
+- OWID Chart-API-aanroep (parameters `v`, `csvType`, `useColumnShortNames`): overgenomen van de
+  officiële [OWID Chart API-documentatie](https://docs.owid.io/projects/etl/api/chart-api/).
 
-## Nog te doen voor jouw inlevering
+## Beperkingen / wat (nog) niet mogelijk is
 
-- [ ] `RAW_BASE_URL` invullen zodra je gepusht hebt (zie hierboven).
-- [ ] Nagaan bij je docent of ophalen-via-publieke-CSV-URL voldoet aan de
-      "openbare API"-eis, of dat een JSON-API verplicht is.
-- [ ] Deelvragen expliciet beantwoorden in de presentatie aan de hand van de
-      tabbladen "GDP vs CO₂" (Kuznets-curve) en "Walk vs Talk" (ontkoppeling).
-- [ ] Eigen interpretatie van de resultaten toevoegen — de cijfers/analyse
-      staan klaar, de duiding is aan jou.
-- [ ] Dataset-keuze uiterlijk woensdag week 3 melden bij Jerome Mies via Teams.
-- [ ] Overgenomen code (bv. van Streamlit-documentatie) van bronvermelding voorzien.
+- Correlatie ≠ causaliteit: het dashboard laat samenhang en trends zien, geen bewijs dat beleid
+  X uitstoot Y heeft veroorzaakt.
+- GDP-cijfers ontbreken voor de laatste jaren (rapportagevertraging) en voor een aantal kleine
+  (eiland)staten — dit vermindert het aantal landen in de Kuznets-curve-analyse.
+- De inkomensgroep-indeling is zelf afgeleid en niet gelijk aan officiële Wereldbank-groepen.
