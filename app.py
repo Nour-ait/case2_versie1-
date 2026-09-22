@@ -1,38 +1,17 @@
-# ==============================================================================
-# CASE 2: DASHBOARD KLIMAATBELEID VS. REALITEIT
-# Bronvermelding code:
-# - Streamlit Layout & State: https://docs.streamlit.io/
-# - Plotly Express Scatter & Choropleth: https://plotly.com/python/plotly-express/
-# - Pandas Data Transformation & Merging: https://pandas.pydata.org/docs/
-# ==============================================================================
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Page configuration (Bron: Streamlit API Reference)
-st.set_page_config(
-    page_title="Klimaatbeleid vs. Realiteit", 
-    layout="wide", 
-    initial_sidebar_state="expanded"
-)
+# Pagina-instellingen
+st.set_page_config(page_title="Klimaatbeleid vs. Realiteit", layout="wide")
 
-# ------------------------------------------------------------------------------
-# 1. DATA VERKENNING, BEWERKING & CACHING (IDS Eisen)
-# ------------------------------------------------------------------------------
+# Data inladen en opschonen
 @st.cache_data
-def load_and_process_data():
-    """
-    Laadt de CSV bestanden (met toestemming i.p.v. openbare API),
-    schoont de data op en voert een Inner Join uit.
-    """
-    # Bron data 1: Our World in Data (CO2 Emissions)
+def load_data():
     df_co2 = pd.read_csv('data/annual-co2-emissions-per-country.csv')
-    
-    # Bron data 2: Renewable Energy Share Dataset (Ember / World Bank)
     df_ren = pd.read_csv('data/renewable_energy_share_2000_2025.csv')
     
-    # Herbenoemen van kolommen voor consistentie
+    # Kolommen hernoemen
     df_co2.rename(columns={
         'Entity': 'country_co2', 
         'Code': 'iso_code', 
@@ -40,30 +19,24 @@ def load_and_process_data():
         'Annual CO₂ emissions': 'co2_emissions'
     }, inplace=True)
     
-    # Statistieken voor join-verantwoording
-    raw_co2_rows = len(df_co2)
-    raw_ren_rows = len(df_ren)
+    # Aantallen bewaren voor de verantwoording
+    raw_co2_count = len(df_co2)
+    raw_ren_count = len(df_ren)
     
-    # Dataverkenning & Schoonmaken: Filteren op geldige 3-letterige ISO-landcodes
-    # Dit verwijdert geaggregeerde regio's zoals 'World', 'Europe', etc.
+    # Filteren op geldige ISO3-landcodes (3 letters)
     df_co2_clean = df_co2[df_co2['iso_code'].notna() & (df_co2['iso_code'].str.len() == 3)].copy()
     df_ren_clean = df_ren[df_ren['iso_code'].notna() & (df_ren['iso_code'].str.len() == 3)].copy()
     
-    # Inner Join op Unieke Sleutel: [iso_code, year]
-    merged = pd.merge(
-        df_co2_clean, 
-        df_ren_clean, 
-        on=['iso_code', 'year'], 
-        how='inner'
-    )
+    # Samenvoegen op landcode en jaar
+    merged = pd.merge(df_co2_clean, df_ren_clean, on=['iso_code', 'year'], how='inner')
     
-    # Afgeleide Variabelen (Feature Engineering)
+    # Extra variabelen berekenen
     merged['gdp_per_capita'] = merged['gdp'] / merged['population']
-    merged['co2_per_capita'] = merged['co2_emissions'] / merged['population'] # ton CO2 p.p.
+    merged['co2_per_capita'] = merged['co2_emissions'] / merged['population']
     
     stats = {
-        'raw_co2': raw_co2_rows,
-        'raw_ren': raw_ren_rows,
+        'raw_co2': raw_co2_count,
+        'raw_ren': raw_ren_count,
         'clean_co2': len(df_co2_clean),
         'clean_ren': len(df_ren_clean),
         'merged': len(merged)
@@ -71,82 +44,68 @@ def load_and_process_data():
     
     return merged, stats
 
-# Data inladen met error handeling
+# Data laden
 try:
-    df, stats = load_and_process_data()
+    df, stats = load_data()
 except Exception as e:
-    st.error(f"Fout bij het inladen van de data uit de data/ map: {e}")
+    st.error(f"Fout bij het laden van de bestanden: {e}")
     st.stop()
 
-# ------------------------------------------------------------------------------
-# 2. HEADER & ONDERZOEKSVRAAG
-# ------------------------------------------------------------------------------
-st.title("🌱 Klimaatbeleid vs. Werkelijkheid")
-st.markdown("""
-**Hoofdvraag:** *In hoeverre komt de transitie naar hernieuwbare energie daadwerkelijk tot uiting in een daling van de CO₂-uitstoot per capita, en welke rol speelt het inkomensniveau (GDP per capita) van een land hierin?*
-""")
-
-# ------------------------------------------------------------------------------
-# 3. INTERACTIEVE SIDEBAR (Verplichte Controls: Slider, Dropdown, Checkbox)
-# ------------------------------------------------------------------------------
-st.sidebar.header("🎛️ Dashboard Filters")
-
-# CONTROL 1: SLIDER (Verplicht)
-selected_year = st.sidebar.slider(
-    "Selecteer Jaar", 
-    min_value=int(df['year'].min()), 
-    max_value=int(df['year'].max()), 
-    value=2021
+# Titel en korte toelichting
+st.title("Klimaatbeleid vs. Realiteit")
+st.write(
+    "In dit dashboard onderzoeken we in hoeverre de overstap naar hernieuwbare energie "
+    "leidt tot een lagere CO₂-uitstoot per inwoner, en wat de rol is van de welvaart van een land."
 )
 
-# CONTROL 2: DROPDOWN / SELECTBOX (Verplicht)
-income_groups = [
-    "Alle Inkomensniveaus", 
-    "Hoge Inkomens (> $20.000)", 
-    "Midden Inkomens ($5.000 - $20.000)", 
-    "Lage Inkomens (< $5.000)"
+# Zijbalk met filters (Slider, Dropdown, Checkbox)
+st.sidebar.header("Filters")
+
+# 1. Slider (Jaar)
+selected_year = st.sidebar.slider("Selecteer een jaar", min_value=2000, max_value=2021, value=2021)
+
+# 2. Dropdown (Inkomensniveau)
+income_options = [
+    "Alle landen", 
+    "Hoge inkomens (> $20.000)", 
+    "Midden inkomens ($5.000 - $20.000)", 
+    "Lage inkomens (< $5.000)"
 ]
-selected_income = st.sidebar.selectbox("Filter op Inkomensniveau", income_groups)
+selected_income = st.sidebar.selectbox("Filter op inkomensniveau", income_options)
 
-# CONTROL 3: CHECKBOX (Verplicht)
-log_scale = st.sidebar.checkbox("Logaritmische Schaal op GDP-as", value=True)
-show_annotations = st.sidebar.checkbox("Toon Visual Annotaties op Grafieken", value=True)
+# 3. Checkbox (Logaritmische schaal)
+use_log_scale = st.sidebar.checkbox("Logaritmische schaal voor GDP", value=True)
 
-# Data filteren op basis van gekozen controls
+# Filteren op basis van de zijbalk
 df_year = df[df['year'] == selected_year].copy()
 
-if selected_income == "Hoge Inkomens (> $20.000)":
+if selected_income == "Hoge inkomens (> $20.000)":
     df_year = df_year[df_year['gdp_per_capita'] > 20000]
-elif selected_income == "Midden Inkomens ($5.000 - $20.000)":
+elif selected_income == "Midden inkomens ($5.000 - $20.000)":
     df_year = df_year[(df_year['gdp_per_capita'] >= 5000) & (df_year['gdp_per_capita'] <= 20000)]
-elif selected_income == "Lage Inkomens (< $5.000)":
+elif selected_income == "Lage inkomens (< $5.000)":
     df_year = df_year[df_year['gdp_per_capita'] < 5000]
 
-# KPIs bovenaan
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-kpi1.metric("Aantal Landen in Filter", len(df_year))
-kpi2.metric("Gem. Hernieuwbare Stroom", f"{df_year['renewables_share_elec'].mean():.1f}%")
-kpi3.metric("Gem. CO₂ per capita", f"{df_year['co2_per_capita'].mean():.2f} ton")
-kpi4.metric("Gem. GDP per capita", f"${df_year['gdp_per_capita'].mean():,.0f}" if not df_year['gdp_per_capita'].isna().all() else "N/B")
+# Kerncijfers
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Aantal landen", len(df_year))
+col2.metric("Gem. hernieuwbare stroom", f"{df_year['renewables_share_elec'].mean():.1f}%")
+col3.metric("Gem. CO₂ per inwoner", f"{df_year['co2_per_capita'].mean():.2f} ton")
+col4.metric("Gem. GDP per inwoner", f"${df_year['gdp_per_capita'].mean():,.0f}" if not df_year['gdp_per_capita'].isna().all() else "N/B")
 
 st.divider()
 
-# ------------------------------------------------------------------------------
-# 4. HOOFDSTRUCTURE TABS (Visual Analytics Storytelling)
-# ------------------------------------------------------------------------------
+# Tabbladen
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📉 Environmental Kuznets Curve", 
-    "🏃 Walk vs. Talk Analyser", 
-    "🗺️ Wereldkaart & Landen", 
-    "📋 Data, Join & Bronnen"
+    "GDP vs. CO₂ Uitstoot", 
+    "Verandering 2000-2021", 
+    "Landen & Wereldkaart", 
+    "Data & Verantwoording"
 ])
 
-# ------------------------------------------------------------------------------
-# TAB 1: KUZNETS CURVE (Analyse & Annotaties)
-# ------------------------------------------------------------------------------
+# Tab 1: GDP vs CO2
 with tab1:
-    st.subheader("1. Environmental Kuznets Curve (EKC)")
-    st.write("Onderzoekt of de CO₂-uitstoot per capita eerst stijgt met economische welvaart (GDP) en na een omslagpunt afvlakt of daalt.")
+    st.subheader(f"Relatie tussen GDP en CO₂-uitstoot ({selected_year})")
     
     fig_ekc = px.scatter(
         df_year,
@@ -155,40 +114,21 @@ with tab1:
         size="population",
         color="renewables_share_elec",
         hover_name="country",
-        log_x=log_scale,
-        color_continuous_scale=px.colors.sequential.Viridis,
+        log_x=use_log_scale,
         labels={
-            "gdp_per_capita": "GDP per Capita (USD)", 
-            "co2_per_capita": "CO₂ per Capita (ton)", 
-            "renewables_share_elec": "% Hernieuwbare Stroom"
-        },
-        title=f"Relatie GDP per Capita vs. CO₂ per Capita ({selected_year})"
+            "gdp_per_capita": "GDP per inwoner (USD)",
+            "co2_per_capita": "CO₂ per inwoner (ton)",
+            "renewables_share_elec": "% Hernieuwbare stroom"
+        }
     )
-    
-    # Annotaties toevoegen (VA Rubric: Vergelijken en annoteren)
-    if show_annotations and not df_year.empty:
-        # Zoek hoogste uitstoter voor annotatie
-        top_emitter = df_year.loc[df_year['co2_per_capita'].idxmax()]
-        fig_ekc.add_annotation(
-            x=top_emitter['gdp_per_capita'],
-            y=top_emitter['co2_per_capita'],
-            text=f"Hoogste uitstoot: {top_emitter['country']}",
-            showarrow=True,
-            arrowhead=2,
-            arrowcolor="red"
-        )
-
     st.plotly_chart(fig_ekc, use_container_width=True)
-    st.info("💡 **Inzicht:** Welvarende landen laten een geleidelijke ontkoppeling zien: hoge GDP-waarden combineren met een afnemende CO₂-voetafdruk door investeringen in hernieuwbare stroom.")
-
-# ------------------------------------------------------------------------------
-# TAB 2: WALK VS TALK CLASSIFICATIE
-# ------------------------------------------------------------------------------
-with tab2:
-    st.subheader("2. 'Walk' vs. 'Talk' Classificatie (2000 - 2021)")
-    st.write("Analyseert welk deel van de landen daadwerkelijk CO₂-reductie realiseert ('Walk') versus landen waar groene energiegroei teniet wordt gedaan door economische uitbreiding ('Talk').")
     
-    # Vergelijking 2000 vs 2021
+    st.write("Toelichting: In deze grafiek is te zien hoe rijkere landen zich verhouden tot ontwikkelingslanden. Veel welvarende landen laten zien dat de CO₂-uitstoot per inwoner afneemt naarmate het aandeel hernieuwbare energie stijgt.")
+
+# Tab 2: Verandering over de tijd
+with tab2:
+    st.subheader("Verandering in CO₂ en hernieuwbare energie (2000 vs. 2021)")
+    
     df_2000 = df[df['year'] == 2000][['iso_code', 'country', 'co2_per_capita', 'renewables_share_elec']]
     df_2021 = df[df['year'] == 2021][['iso_code', 'co2_per_capita', 'renewables_share_elec']]
     df_change = pd.merge(df_2000, df_2021, on='iso_code', suffixes=('_2000', '_2021'))
@@ -196,17 +136,17 @@ with tab2:
     df_change['co2_pct_change'] = ((df_change['co2_per_capita_2021'] - df_change['co2_per_capita_2000']) / df_change['co2_per_capita_2000']) * 100
     df_change['ren_diff'] = df_change['renewables_share_elec_2021'] - df_change['renewables_share_elec_2000']
     
-    def classify_country(row):
+    def categoriseer(row):
         if row['ren_diff'] > 5 and row['co2_pct_change'] < 0:
-            return 'Walk (Echte ontkoppeling)'
+            return 'Groene daling (CO₂ daalt, groen stijgt)'
         elif row['ren_diff'] > 5 and row['co2_pct_change'] >= 0:
-            return 'Talk (Groei overstijgt transitie)'
+            return 'Stijging ondanks meer groene energie'
         elif row['ren_diff'] <= 5 and row['co2_pct_change'] < 0:
-            return 'Passieve CO₂-daling'
+            return 'Daling zonder grote groene groei'
         else:
-            return 'Stagnatie / Stijging'
+            return 'Beperkte verandering of stijging'
 
-    df_change['Categorie'] = df_change.apply(classify_country, axis=1)
+    df_change['Categorie'] = df_change.apply(categoriseer, axis=1)
     
     fig_walk = px.scatter(
         df_change,
@@ -215,107 +155,74 @@ with tab2:
         color="Categorie",
         hover_name="country",
         labels={
-            "ren_diff": "Toename Hernieuwbare Stroom (%-punt)", 
-            "co2_pct_change": "Verandering CO₂ per Capita (%)"
-        },
-        title="Ontwikkeling Hernieuwbare Energie vs. CO₂-Daling (2000 vs 2021)"
+            "ren_diff": "Toename hernieuwbare stroom (%-punt)",
+            "co2_pct_change": "Verandering CO₂ per inwoner (%)"
+        }
     )
-    
-    # Referentielijnen en annotaties
-    fig_walk.add_hline(y=0, line_dash="dash", line_color="red")
+    fig_walk.add_hline(y=0, line_dash="dash", line_color="gray")
     fig_walk.add_vline(x=5, line_dash="dash", line_color="gray")
-    
-    if show_annotations:
-        fig_walk.add_annotation(
-            x=20, y=-40,
-            text="Quadrant 'Walk': Stijging hernieuwbaar & daling CO₂",
-            showarrow=False,
-            font=dict(size=10, color="green")
-        )
-
     st.plotly_chart(fig_walk, use_container_width=True)
 
-# ------------------------------------------------------------------------------
-# TAB 3: WERELDKAART & HISTORISCHE TREND
-# ------------------------------------------------------------------------------
+# Tab 3: Wereldkaart en Tijdreeks
 with tab3:
-    st.subheader("3. Geografische Spreiding & Landen Trend")
+    st.subheader(f"Aandeel hernieuwbare stroom per land ({selected_year})")
     
     fig_map = px.choropleth(
         df_year,
         locations="iso_code",
         color="renewables_share_elec",
         hover_name="country",
-        color_continuous_scale=px.colors.sequential.Greens,
-        title=f"Aandeel Hernieuwbare Elektriciteit per Land ({selected_year})"
+        color_continuous_scale="Greens",
+        labels={"renewables_share_elec": "% Hernieuwbaar"}
     )
     st.plotly_chart(fig_map, use_container_width=True)
     
     st.divider()
     
-    st.subheader("Historische Trend (2000 - 2022)")
-    all_countries = sorted(df['country'].unique())
-    default_index = all_countries.index("Netherlands") if "Netherlands" in all_countries else 0
-    selected_country = st.selectbox("Selecteer een land voor de trendanalyse", all_countries, index=default_index)
+    st.subheader("Verloop per land over de tijd")
+    landen_lijst = sorted(df['country'].unique())
+    gekozen_land = st.selectbox("Selecteer een land", landen_lijst, index=landen_lijst.index("Netherlands") if "Netherlands" in landen_lijst else 0)
     
-    df_country = df[df['country'] == selected_country].sort_values("year")
+    df_land = df[df['country'] == gekozen_land].sort_values("year")
     
     fig_line = px.line(
-        df_country,
+        df_land,
         x="year",
         y=["renewables_share_elec", "co2_per_capita"],
-        title=f"Trendontwikkeling in {selected_country}",
-        labels={"value": "Waarde", "year": "Jaar", "variable": "Variabele"}
+        labels={"value": "Waarde", "year": "Jaar", "variable": "Variabele"},
+        title=f"Ontwikkeling in {gekozen_land}"
     )
-    
-    if show_annotations:
-        # Parijs Akkoord annotatie (2015)
-        fig_line.add_vline(x=2015, line_dash="dot", line_color="blue")
-        fig_line.add_annotation(
-            x=2015, y=df_country['renewables_share_elec'].max() if not df_country.empty else 0,
-            text="Klimaatakkoord van Parijs (2015)",
-            showarrow=True,
-            arrowhead=1
-        )
-
+    # Markering voor het Klimaatakkoord van Parijs
+    fig_line.add_vline(x=2015, line_dash="dot", line_color="blue", annotation_text="Parijs-akkoord (2015)")
     st.plotly_chart(fig_line, use_container_width=True)
 
-# ------------------------------------------------------------------------------
-# TAB 4: DATASET TRANSFORMATIE, JOIN VERANTWOORDING & BRONNEN
-# ------------------------------------------------------------------------------
+# Tab 4: Data & Verantwoording
 with tab4:
-    st.subheader("4. Datatransformatie & Join Verantwoording")
- 
+    st.subheader("Dataverantwoording")
+    st.write(
+        "Voor dit dashboard zijn twee losse datasets gecombineerd via een **inner join** "
+        "op de combinatie van landcode (ISO3) en het betreffende jaar."
+    )
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown(f"""
-        ### 📊 Dataverkenning & Join Statistieken
-        * **CO₂ Dataset (Ruaw)**: `{stats['raw_co2']:,}` rijen
-        * **CO₂ Dataset (Na ISO3 filter)**: `{stats['clean_co2']:,}` rijen
-        * **Renewables Dataset (Ruw)**: `{stats['raw_ren']:,}` rijen
-        * **Renewables Dataset (Na ISO3 filter)**: `{stats['clean_ren']:,}` rijen
-        * **Koppelsleutel (Join Keys)**: `iso_code` + `year`
-        * **Resultaat na Inner Join**: **`{stats['merged']:,}` rijen**
-        """)
+    st.write("**Aantallen rijen voor en na het samenvoegen:**")
+    st.write(f"- CO₂-dataset (ruw): {stats['raw_co2']:,} rijen")
+    st.write(f"- CO₂-dataset (na filteren op landcodes): {stats['clean_co2']:,} rijen")
+    st.write(f"- Hernieuwbare energie dataset (ruw): {stats['raw_ren']:,} rijen")
+    st.write(f"- Hernieuwbare energie dataset (na filteren op landcodes): {stats['clean_ren']:,} rijen")
+    st.write(f"- **Uiteindelijke samengevoegde dataset:** {stats['merged']:,} rijen")
     
-    with col_b:
-        st.markdown("""
-        ### 🔍 Valkuilcontrole
-        Rijen die zijn afgevallen betreffen voornamelijk **geaggregeerde continenten en regio's** (zoals *World*, *European Union*, *OECD*) die geen officiële 3-letterige ISO3-code hebben. Dit voorkomt dubbeltelling in landelijke analyses.
-        """)
-        
+    st.write(
+        "Toelichting uitval: Continenten en regio's (zoals 'World' of 'Europe') "
+        "zijn gefilterd omdat deze geen landcode hebben. Zo voorkomen we dubbeltellingen."
+    )
+    
     st.divider()
     
-    st.subheader("📚 Bronvermelding")
-    st.markdown("""
-    * **CO₂ Uitstoot Data**: Our World in Data (OWID) - *Annual CO₂ Emissions per country*.
-    * **Hernieuwbare Energie Data**: Ember Climate / World Bank Development Indicators.
-    * **Code Libraries**:
-        * Streamlit (Dashboard UI) — [docs.streamlit.io](https://docs.streamlit.io)
-        * Plotly Express (Visualisaties) — [plotly.com/python/plotly-express](https://plotly.com/python/plotly-express/)
-        * Pandas (Data manipulatie) — [pandas.pydata.org](https://pandas.pydata.org/)
-    """)
+    st.subheader("Bronvermelding")
+    st.write("- **CO₂-gegevens:** Our World in Data (Annual CO₂ emissions)")
+    st.write("- **Hernieuwbare energie:** Ember Climate / World Bank Indicators")
+    st.write("- **Software:** Python, Streamlit, Pandas, Plotly Express")
+    st.write("- *Noot: De CSV-bestanden zijn lokaal ingelezen vanuit de data/ map met toestemming van de docent.*")
     
-    st.subheader("Preview Samengevoegde Dataset")
-    st.dataframe(df_year[['iso_code', 'country', 'year', 'co2_emissions', 'co2_per_capita', 'renewables_share_elec', 'gdp_per_capita']].head(25))
+    st.write("**Preview van de samengevoegde data:**")
+    st.dataframe(df_year[['iso_code', 'country', 'year', 'co2_emissions', 'co2_per_capita', 'renewables_share_elec', 'gdp_per_capita']].head(15))
