@@ -32,14 +32,20 @@ def load_data():
     # Inner Join op ISO3-landcode + jaar
     merged = pd.merge(df_co2_clean, df_ren_clean, on=['iso_code', 'year'], how='inner')
     
-    # Feature Engineering
-    merged['gdp_per_capita'] = merged['gdp'] / merged['population']
-    merged['co2_per_capita'] = merged['co2_emissions'] / merged['population']
+    # Feature Engineering (veilig omgaan met deling door nul of afwezige bevolking)
+    merged['gdp_per_capita'] = merged.apply(
+        lambda r: r['gdp'] / r['population'] if pd.notna(r['population']) and r['population'] > 0 else None, axis=1
+    )
+    merged['co2_per_capita'] = merged.apply(
+        lambda r: r['co2_emissions'] / r['population'] if pd.notna(r['population']) and r['population'] > 0 else None, axis=1
+    )
     
     # Inkomenscategorieën toevoegen voor deelvraag 3
     bins = [-float('inf'), 5000, 20000, float('inf')]
     labels = ['Lage inkomens (< $5k)', 'Opkomende inkomens ($5k-$20k)', 'Hoge inkomens (> $20k)']
     merged['income_group'] = pd.cut(merged['gdp_per_capita'], bins=bins, labels=labels)
+    # Voeg een categorie toe voor onbekend/geen data om fouten te voorkomen
+    merged['income_group'] = merged['income_group'].astype(str).replace({'nan': 'Onbekend / Geen BBP'})
     
     stats = {
         'raw_co2': raw_co2_count,
@@ -73,7 +79,7 @@ st.markdown(
 st.sidebar.header("Filters")
 selected_year = st.sidebar.slider("Selecteer een jaar", min_value=min_jaar, max_value=max_jaar, value=max_jaar)
 
-# LANDENFILTER TOEGEVOEGD
+# LANDENFILTER
 landen_lijst = sorted(df['country'].unique())
 selected_countries = st.sidebar.multiselect(
     "Filter op specifieke landen",
@@ -104,8 +110,8 @@ elif selected_income == "Lage inkomens (< $5k)":
 # Kerncijfers van de gekozen selectie
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Aantal analyseerde landen", len(df_year))
-col2.metric("Gem. hernieuwbare stroom", f"{df_year['renewables_share_elec'].mean():.1f}%" if len(df_year) > 0 else "N/B")
-col3.metric("Gem. CO₂ per inwoner", f"{df_year['co2_per_capita'].mean():.2f} ton" if len(df_year) > 0 else "N/B")
+col2.metric("Gem. hernieuwbare stroom", f"{df_year['renewables_share_elec'].mean():.1f}%" if len(df_year) > 0 and not df_year['renewables_share_elec'].isna().all() else "N/B")
+col3.metric("Gem. CO₂ per inwoner", f"{df_year['co2_per_capita'].mean():.2f} ton" if len(df_year) > 0 and not df_year['co2_per_capita'].isna().all() else "N/B")
 col4.metric("Gem. GDP per inwoner", f"${df_year['gdp_per_capita'].mean():,.0f}" if len(df_year) > 0 and not df_year['gdp_per_capita'].isna().all() else "N/B")
 
 st.divider()
@@ -128,23 +134,29 @@ with tab1:
         "stijgt CO₂-uitstoot mee met GDP per capita tot een bepaald welvaartsniveau, om daarna af te vlakken of te dalen?"
     )
     
-    fig_ekc = px.scatter(
-        df_year,
-        x="gdp_per_capita",
-        y="co2_per_capita",
-        size="population",
-        color="income_group",
-        hover_name="country",
-        log_x=use_log_scale,
-        labels={
-            "gdp_per_capita": "GDP per inwoner (USD)",
-            "co2_per_capita": "CO₂ per inwoner (ton)",
-            "income_group": "Inkomensgroep",
-            "population": "Bevolking"
-        },
-        title=f"Koppelverband GDP vs CO₂ per inwoner per inkomensgroep ({selected_year})"
-    )
-    st.plotly_chart(fig_ekc, use_container_width=True)
+    # Filter uitvallers zonder BBP/Bevolking voor de EKC-plot
+    df_ekc_clean = df_year.dropna(subset=['gdp_per_capita', 'co2_per_capita', 'population'])
+    
+    if len(df_ekc_clean) == 0:
+        st.warning("Er zijn geen volledige gegevens (BBP en CO₂ per inwoner) beschikbaar voor de huidige selectie.")
+    else:
+        fig_ekc = px.scatter(
+            df_ekc_clean,
+            x="gdp_per_capita",
+            y="co2_per_capita",
+            size="population",
+            color="income_group",
+            hover_name="country",
+            log_x=use_log_scale,
+            labels={
+                "gdp_per_capita": "GDP per inwoner (USD)",
+                "co2_per_capita": "CO₂ per inwoner (ton)",
+                "income_group": "Inkomensgroep",
+                "population": "Bevolking"
+            },
+            title=f"Koppelverband GDP vs CO₂ per inwoner per inkomensgroep ({selected_year})"
+        )
+        st.plotly_chart(fig_ekc, use_container_width=True)
     
     st.markdown("""
     **Analyse & Inzichten:**
@@ -170,37 +182,43 @@ with tab2:
     # TOEPASSEN LANDENFILTER OP DF_CHANGE
     if selected_countries:
         df_change = df_change[df_change['country'].isin(selected_countries)]
+        
+    # Verwijder rijen met ontbrekende start- of eindwaarden
+    df_change = df_change.dropna(subset=[f'co2_per_capita_{min_jaar}', f'co2_per_capita_{max_jaar}', f'renewables_share_elec_{min_jaar}', f'renewables_share_elec_{max_jaar}'])
     
-    df_change['co2_pct_change'] = ((df_change[f'co2_per_capita_{max_jaar}'] - df_change[f'co2_per_capita_{min_jaar}']) / df_change[f'co2_per_capita_{min_jaar}']) * 100
-    df_change['ren_diff'] = df_change[f'renewables_share_elec_{max_jaar}'] - df_change[f'renewables_share_elec_{min_jaar}']
-    
-    def categoriseer(row):
-        if row['ren_diff'] > 5 and row['co2_pct_change'] < 0:
-            return 'Walk: Groene daling (Meer hernieuwbaar & minder CO₂)'
-        elif row['ren_diff'] > 5 and row['co2_pct_change'] >= 0:
-            return 'Talk/Lag: Meer hernieuwbaar, maar CO₂ stijgt toch'
-        elif row['ren_diff'] <= 5 and row['co2_pct_change'] < 0:
-            return 'Passieve daling (Minder CO₂ zonder grote groene groei)'
-        else:
-            return 'Achterblijvers (Weinig groene groei & stijgende CO₂)'
+    if len(df_change) == 0:
+        st.warning("Er zijn onvoldoende historische gegevens beschikbaar voor de gekozen selectie om de ontkoppeling te berekenen.")
+    else:
+        df_change['co2_pct_change'] = ((df_change[f'co2_per_capita_{max_jaar}'] - df_change[f'co2_per_capita_{min_jaar}']) / df_change[f'co2_per_capita_{min_jaar}']) * 100
+        df_change['ren_diff'] = df_change[f'renewables_share_elec_{max_jaar}'] - df_change[f'renewables_share_elec_{min_jaar}']
+        
+        def categoriseer(row):
+            if row['ren_diff'] > 5 and row['co2_pct_change'] < 0:
+                return 'Walk: Groene daling (Meer hernieuwbaar & minder CO₂)'
+            elif row['ren_diff'] > 5 and row['co2_pct_change'] >= 0:
+                return 'Talk/Lag: Meer hernieuwbaar, maar CO₂ stijgt toch'
+            elif row['ren_diff'] <= 5 and row['co2_pct_change'] < 0:
+                return 'Passieve daling (Minder CO₂ zonder grote groene groei)'
+            else:
+                return 'Achterblijvers (Weinig groene groei & stijgende CO₂)'
 
-    df_change['Categorie'] = df_change.apply(categoriseer, axis=1)
-    
-    fig_walk = px.scatter(
-        df_change,
-        x="ren_diff",
-        y="co2_pct_change",
-        color="Categorie",
-        hover_name="country",
-        labels={
-            "ren_diff": "Toename hernieuwbare stroom (%-punt)",
-            "co2_pct_change": "Verandering CO₂ per inwoner (%)"
-        },
-        title=f"Toename hernieuwbaar vs. Verandering CO₂-uitstoot ({min_jaar}-{max_jaar})"
-    )
-    fig_walk.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig_walk.add_vline(x=5, line_dash="dash", line_color="gray")
-    st.plotly_chart(fig_walk, use_container_width=True)
+        df_change['Categorie'] = df_change.apply(categoriseer, axis=1)
+        
+        fig_walk = px.scatter(
+            df_change,
+            x="ren_diff",
+            y="co2_pct_change",
+            color="Categorie",
+            hover_name="country",
+            labels={
+                "ren_diff": "Toename hernieuwbare stroom (%-punt)",
+                "co2_pct_change": "Verandering CO₂ per inwoner (%)"
+            },
+            title=f"Toename hernieuwbaar vs. Verandering CO₂-uitstoot ({min_jaar}-{max_jaar})"
+        )
+        fig_walk.add_hline(y=0, line_dash="dash", line_color="gray")
+        fig_walk.add_vline(x=5, line_dash="dash", line_color="gray")
+        st.plotly_chart(fig_walk, use_container_width=True)
     
     st.markdown("""
     **Categorie-indeling:**
@@ -231,15 +249,19 @@ with tab3:
     
     df_land = df[df['country'] == gekozen_land].sort_values("year")
     
-    fig_line = px.line(
-        df_land,
-        x="year",
-        y=["renewables_share_elec", "co2_per_capita"],
-        labels={"value": "Waarde", "year": "Jaar", "variable": "Variabele"},
-        title=f"Historische ontwikkeling in {gekozen_land}"
-    )
-    fig_line.add_vline(x=2015, line_dash="dot", line_color="blue", annotation_text="Parijs-akkoord (2015)")
-    st.plotly_chart(fig_line, use_container_width=True)
+    # Checken of land data heeft
+    if df_land[['renewables_share_elec', 'co2_per_capita']].dropna(how='all').empty:
+        st.warning(f"Er is geen tijdsreeksdata voor {gekozen_land} beschikbaar.")
+    else:
+        fig_line = px.line(
+            df_land,
+            x="year",
+            y=["renewables_share_elec", "co2_per_capita"],
+            labels={"value": "Waarde", "year": "Jaar", "variable": "Variabele"},
+            title=f"Historische ontwikkeling in {gekozen_land}"
+        )
+        fig_line.add_vline(x=2015, line_dash="dot", line_color="blue", annotation_text="Parijs-akkoord (2015)")
+        st.plotly_chart(fig_line, use_container_width=True)
 
 # -----------------------------------------------------------------------------
 # TAB 4: Data & Methodologie
