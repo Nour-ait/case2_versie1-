@@ -1,6 +1,4 @@
-Hier is een uitgebreide en heldere uitleg van de code. Je kunt deze tekst kopiëren en opslaan als een **`DOCUMENTATIE.md`** bestand op GitHub, of gebruiken als voorbereiding op je presentatie.
 
-Het document is opgebouwd in twee delen:
 
 1. **Match met de Opdracht**: Welke eis uit de rubric hoort bij welk onderdeel.
 2. **Code-uitleg van regel tot regel**: Precies wat de Python-code stap voor stap doet in begrijpelijke taal.
