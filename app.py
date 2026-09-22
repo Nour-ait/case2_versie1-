@@ -51,6 +51,10 @@ except Exception as e:
     st.error(f"Fout bij het laden van de bestanden: {e}")
     st.stop()
 
+# Dynamisch berekenen van het eerste en laatste jaar uit de dataset
+min_jaar = int(df['year'].min())
+max_jaar = int(df['year'].max())
+
 # Titel en korte toelichting
 st.title("Klimaatbeleid vs. Realiteit")
 st.write(
@@ -61,8 +65,8 @@ st.write(
 # Zijbalk met filters (Slider, Dropdown, Checkbox)
 st.sidebar.header("Filters")
 
-# 1. Slider (Jaar)
-selected_year = st.sidebar.slider("Selecteer een jaar", min_value=2000, max_value=2021, value=2021)
+# 1. Slider (Jaar - dynamisch gekoppeld aan de dataset)
+selected_year = st.sidebar.slider("Selecteer een jaar", min_value=min_jaar, max_value=max_jaar, value=max_jaar)
 
 # 2. Dropdown (Inkomensniveau)
 income_options = [
@@ -98,7 +102,7 @@ st.divider()
 # Tabbladen
 tab1, tab2, tab3, tab4 = st.tabs([
     "GDP vs. CO₂ Uitstoot", 
-    "Verandering 2000-2021", 
+    f"Verandering {min_jaar}-{max_jaar}", 
     "Landen & Wereldkaart", 
     "Data & Verantwoording"
 ])
@@ -127,14 +131,14 @@ with tab1:
 
 # Tab 2: Verandering over de tijd
 with tab2:
-    st.subheader("Verandering in CO₂ en hernieuwbare energie (2000 vs. 2021)")
+    st.subheader(f"Verandering in CO₂ en hernieuwbare energie ({min_jaar} vs. {max_jaar})")
     
-    df_2000 = df[df['year'] == 2000][['iso_code', 'country', 'co2_per_capita', 'renewables_share_elec']]
-    df_2021 = df[df['year'] == 2021][['iso_code', 'co2_per_capita', 'renewables_share_elec']]
-    df_change = pd.merge(df_2000, df_2021, on='iso_code', suffixes=('_2000', '_2021'))
+    df_start = df[df['year'] == min_jaar][['iso_code', 'co2_per_capita', 'renewables_share_elec']]
+    df_recent = df[df['year'] == max_jaar][['iso_code', 'country', 'co2_per_capita', 'renewables_share_elec']]
+    df_change = pd.merge(df_start, df_recent, on='iso_code', suffixes=(f'_{min_jaar}', f'_{max_jaar}'))
     
-    df_change['co2_pct_change'] = ((df_change['co2_per_capita_2021'] - df_change['co2_per_capita_2000']) / df_change['co2_per_capita_2000']) * 100
-    df_change['ren_diff'] = df_change['renewables_share_elec_2021'] - df_change['renewables_share_elec_2000']
+    df_change['co2_pct_change'] = ((df_change[f'co2_per_capita_{max_jaar}'] - df_change[f'co2_per_capita_{min_jaar}']) / df_change[f'co2_per_capita_{min_jaar}']) * 100
+    df_change['ren_diff'] = df_change[f'renewables_share_elec_{max_jaar}'] - df_change[f'renewables_share_elec_{min_jaar}']
     
     def categoriseer(row):
         if row['ren_diff'] > 5 and row['co2_pct_change'] < 0:
