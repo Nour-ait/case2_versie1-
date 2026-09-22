@@ -73,6 +73,15 @@ st.markdown(
 st.sidebar.header("Filters")
 selected_year = st.sidebar.slider("Selecteer een jaar", min_value=min_jaar, max_value=max_jaar, value=max_jaar)
 
+# LANDENFILTER TOEGEVOEGD
+landen_lijst = sorted(df['country'].unique())
+selected_countries = st.sidebar.multiselect(
+    "Filter op specifieke landen",
+    options=landen_lijst,
+    default=[],
+    help="Laat leeg om alle landen te analyseren"
+)
+
 income_options = ["Alle inkomensgroepen", "Hoge inkomens (> $20k)", "Opkomende inkomens ($5k-$20k)", "Lage inkomens (< $5k)"]
 selected_income = st.sidebar.selectbox("Filter op inkomensniveau", income_options)
 
@@ -80,6 +89,10 @@ use_log_scale = st.sidebar.checkbox("Logaritmische schaal voor GDP", value=True)
 
 # Dataselectie filteren op basis van zijbalk
 df_year = df[df['year'] == selected_year].copy()
+
+# TOEPASSEN LANDENFILTER OP DF_YEAR
+if selected_countries:
+    df_year = df_year[df_year['country'].isin(selected_countries)]
 
 if selected_income == "Hoge inkomens (> $20k)":
     df_year = df_year[df_year['income_group'] == 'Hoge inkomens (> $20k)']
@@ -154,6 +167,10 @@ with tab2:
     df_recent = df[df['year'] == max_jaar][['iso_code', 'country', 'co2_per_capita', 'renewables_share_elec', 'income_group']]
     df_change = pd.merge(df_start, df_recent, on='iso_code', suffixes=(f'_{min_jaar}', f'_{max_jaar}'))
     
+    # TOEPASSEN LANDENFILTER OP DF_CHANGE
+    if selected_countries:
+        df_change = df_change[df_change['country'].isin(selected_countries)]
+    
     df_change['co2_pct_change'] = ((df_change[f'co2_per_capita_{max_jaar}'] - df_change[f'co2_per_capita_{min_jaar}']) / df_change[f'co2_per_capita_{min_jaar}']) * 100
     df_change['ren_diff'] = df_change[f'renewables_share_elec_{max_jaar}'] - df_change[f'renewables_share_elec_{min_jaar}']
     
@@ -210,7 +227,6 @@ with tab3:
     st.divider()
     
     st.subheader("Verloop per land over de tijd")
-    landen_lijst = sorted(df['country'].unique())
     gekozen_land = st.selectbox("Selecteer een land voor de tijdreeks", landen_lijst, index=landen_lijst.index("Netherlands") if "Netherlands" in landen_lijst else 0)
     
     df_land = df[df['country'] == gekozen_land].sort_values("year")
