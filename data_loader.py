@@ -37,7 +37,7 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 CO2_API_URL = (
     "https://ourworldindata.org/grapher/annual-co2-emissions-per-country.csv"
-    "?v=1&csvType=full&useColumnShortNames=true"
+    "?v=1&csvType=full&useColumnShortNames=false"
 )
 ENERGY_DATA_URL = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"
 
@@ -69,6 +69,27 @@ ENERGY_COLUMNS = [
 ]
 
 
+def _standardize_id_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Hernoemt de land/code/jaar-kolommen naar country/iso_code/year, ongeacht of
+    OWID ze als 'Entity'/'Code'/'Year' of als 'entity'/'code'/'year' teruggeeft
+    (dit verschilt soms per csvType/useColumnShortNames-instelling)."""
+    lookup = {c.lower(): c for c in df.columns}
+    rename_map = {}
+    for target, candidates in {
+        "country": ["entity", "country"],
+        "iso_code": ["code", "iso_code", "iso3"],
+        "year": ["year"],
+    }.items():
+        found = next((lookup[c] for c in candidates if c in lookup), None)
+        if found is None:
+            raise KeyError(
+                f"Kon geen kolom vinden voor '{target}' in de OWID-respons. "
+                f"Beschikbare kolommen: {list(df.columns)}"
+            )
+        rename_map[found] = target
+    return df.rename(columns=rename_map)
+
+
 def _is_real_country(code) -> bool:
     """OWID gebruikt voor regio's/inkomensgroepen (bv. 'Africa', 'High-income
     countries', 'World') geen (of een niet-ISO3) landcode. Door alleen rijen
@@ -84,8 +105,8 @@ def _is_real_country(code) -> bool:
 @st.cache_data(ttl=60 * 60 * 24, show_spinner="CO2-data ophalen bij Our World in Data (API)...")
 def fetch_co2_raw() -> pd.DataFrame:
     df = pd.read_csv(CO2_API_URL, storage_options={"User-Agent": _HTTP_HEADERS["User-Agent"]})
-    df = df.rename(columns={"Entity": "country", "Code": "iso_code", "Year": "year"})
-    # De naam van de waarde-kolom hangt af van de OWID-versie/instellingen; pak 'm dynamisch
+    df = _standardize_id_columns(df)
+    # De naam van de waarde-kolom kan per OWID-versie licht verschillen; pak 'm dynamisch
     # (de eerste kolom die niet country/iso_code/year is).
     value_col = [c for c in df.columns if c not in ("country", "iso_code", "year")][0]
     df = df.rename(columns={value_col: "co2_tonnes"})
