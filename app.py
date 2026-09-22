@@ -285,10 +285,7 @@ with tab3:
 # ------------------------------------------------------------------------------
 with tab4:
     st.subheader("4. Datatransformatie & Join Verantwoording")
-    st.markdown("""
-    **Toestemming Dataverzameling:**  
-    *Er is expliciete toestemming verleend om de onderstaande gereinigde CSV-bestanden te gebruiken voor deze case in plaats van een live API-koppeling.*
-    """)
+ 
     
     col_a, col_b = st.columns(2)
     with col_a:
@@ -310,7 +307,7 @@ with tab4:
         
     st.divider()
     
-    st.subheader("📚 Bronvermelding (Verplicht)")
+    st.subheader("📚 Bronvermelding")
     st.markdown("""
     * **CO₂ Uitstoot Data**: Our World in Data (OWID) - *Annual CO₂ Emissions per country*.
     * **Hernieuwbare Energie Data**: Ember Climate / World Bank Development Indicators.
