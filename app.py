@@ -239,17 +239,22 @@ with tab_data:
 
     st.markdown("### Bronnen")
     st.markdown(
-        "- **OWID CO2-data** — `owid/co2-data` op GitHub, opgehaald via `pandas.read_csv(url)`.\n"
-        "- **OWID Energy-data** — `owid/energy-data` op GitHub, opgehaald via `pandas.read_csv(url)`.\n"
-        "- **World Bank API** — `api.worldbank.org/v2/country`, opgehaald via `requests.get()` (JSON)."
+        "- **CO2-uitstoot per land** — `annual-co2-emissions-per-country.csv` (Our World in Data / "
+        "Global Carbon Project), opgehaald via een publieke URL met `requests`/`pandas.read_csv`.\n"
+        "- **Hernieuwbare energie, GDP en bevolking** — `renewable_energy_share_2000_2025.csv` "
+        "(Our World in Data / Ember), opgehaald via dezelfde methode.\n"
+        "- **Inkomensgroep** wordt zelf berekend uit GDP per capita met de Wereldbank-drempels "
+        "(High / Upper middle / Lower middle / Low income) — geen aparte API nodig hiervoor."
     )
 
     st.markdown("### Join-logging")
     st.json(join_log)
     st.caption(
-        "CO2-data en Energy-data zijn samengevoegd op sleutel (iso_code, year) met een inner join. "
-        "De inkomensclassificatie is daarna toegevoegd op sleutel iso_code met een left join, zodat "
-        "er geen rijen bijkomen (gecontroleerd met een assert in de code)."
+        "De twee bestanden zijn samengevoegd op sleutel (iso_code, year) met een inner join. "
+        "Het CO2-bestand loopt tot en met "
+        f"{join_log['co2_laatste_jaar']}, dus de samengevoegde data stopt automatisch bij "
+        f"{join_log['laatste_jaar_in_gecombineerde_data']} — ook al bevat het energie-bestand "
+        f"nieuwere jaren tot {join_log['energy_laatste_jaar']}."
     )
 
     st.markdown("### Ontbrekende waarden (na opschonen)")
@@ -264,12 +269,14 @@ with tab_data:
 
     st.markdown("### Wat we hebben opgeschoond")
     st.markdown(
-        "- Regio's/werelddeel-aggregaten van OWID (codes die beginnen met `OWID_`, zoals 'World' of "
-        "'Asia') zijn verwijderd — die zijn geen land en zouden de landenvergelijking vervuilen.\n"
+        "- Regio's/werelddeel-aggregaten zonder landcode (zoals 'World', 'Africa', 'European Union', "
+        "'High-income countries') zijn verwijderd uit beide bestanden — dit zijn geen landen en zouden "
+        "de landenvergelijking vervuilen (dubbeltellingen).\n"
         "- `renewables_share_energy` buiten het bereik 0–100% is als ontbrekend gemarkeerd (onmogelijke waarde).\n"
-        "- Negatieve `co2_per_capita` en `gdp_per_capita` zijn als ontbrekend gemarkeerd.\n"
-        "- Landen zonder World Bank-inkomensclassificatie (bv. kleine eilandstaten, Taiwan) krijgen "
-        "de categorie 'Onbekend' in plaats van dat ze uit de dataset vallen."
+        "- Negatieve `co2_per_capita` en `gdp_per_capita` (of nul/negatieve GDP) zijn als ontbrekend gemarkeerd.\n"
+        "- De dataset stopt bij het laatste jaar waarin *beide* bestanden data hebben "
+        f"({join_log['laatste_jaar_in_gecombineerde_data']}) — recentere renewable-cijfers zonder "
+        "bijbehorende CO2-cijfers worden dus niet getoond, om geen appels met peren te vergelijken."
     )
 
     with st.expander("Voorbeeld van de samengevoegde data"):
