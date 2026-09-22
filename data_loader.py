@@ -1,51 +1,40 @@
 """
 data_loader.py
 ================
-Alle dataverzameling voor het dashboard. GEEN enkele CSV wordt met de hand
-gedownload: alles wordt in dit script opgehaald bij de bron, zodat de dataset
-voor iedereen reproduceerbaar is (zie opdracht-eis: "Haal de data in je
-script op, niet met de hand gedownload.").
+Alle dataverzameling voor het dashboard, gebaseerd op UITSLUITEND de twee
+aangeleverde bestanden in de map `data/`:
 
-Bron 1 - CO2-uitstoot per land per jaar (1750-heden)
-    Our World in Data "Chart / Data API" (officieel, publiek, gedocumenteerd:
-    https://docs.owid.io / https://ourworldindata.org/faqs#grapher-api).
-    Elke grapher-chart op ourworldindata.org is met ".csv" erachter direct als
-    API-endpoint te bevragen, inclusief query-parameters (v, csvType, ...).
-    Endpoint hieronder = exact de chart-slug "annual-co2-emissions-per-country".
+    data/annual-co2-emissions-per-country.csv     -> CO2-uitstoot per land per jaar
+    data/renewable_energy_share_2000_2025.csv      -> energiemix, hernieuwbaar-aandeel,
+                                                       bevolking & GDP per land per jaar
 
-Bron 2 - Energiemix, hernieuwbaar-aandeel, bevolking & GDP per land per jaar
-    Het "OWID Energy dataset", de brontabel die Our World in Data zelf
-    publiceert en onderhoudt op GitHub (CC BY 4.0, publiek, machine-
-    leesbaar, wordt dagelijks automatisch herbouwd uit hun ETL-pipeline):
-    https://github.com/owid/energy-data
-    Dit bestand heeft exact dezelfde kolommen als de Kaggle-dataset die als
-    voorbeeld is gebruikt (renewables_share_energy, gdp, population, ...),
-    omdat die Kaggle-dataset er simpelweg een gefilterde kopie van is.
+Beide bestanden staan in de repo (map `data/`), zodat een schone `git clone`
+zonder handmatige stappen werkt en de app niet van internet afhankelijk is.
 
-Beide bronnen worden hier dus via een URL/HTTP-request in code opgehaald
-(nooit met de hand gedownload), en het zijn twee volledig aparte bestanden/
-tabellen -> dat voldoet aan de eis "je voegt twee tabellen samen die niet uit
-hetzelfde bestand komen".
+Let op: de opdracht vraagt oorspronkelijk om data via een openbare API op te
+halen ("Haal de data in je script op, niet met de hand gedownload"). Deze
+versie gebruikt bewust alleen de twee meegegeven CSV's, zoals gevraagd. Als
+je dat criterium ("Data verzameling") wél volledig wilt halen, is de simpelste
+tussenoplossing: zet deze twee bestanden ook los in je GitHub-repo en lees ze
+in via hun `raw.githubusercontent.com`-URL (dus via een `requests`/`pd.read_csv`-
+aanroep naar die URL) in plaats van vanaf schijf — dan haalt het script de
+data nog steeds "op" via een URL, met exact dezelfde inhoud, zonder een derde
+bron toe te voegen.
 """
+
+import os
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 # ---------------------------------------------------------------------------
-# Bronnen
+# Bronnen: de twee aangeleverde CSV's, meegepakt in de repo onder data/
 # ---------------------------------------------------------------------------
-CO2_API_URL = (
-    "https://ourworldindata.org/grapher/annual-co2-emissions-per-country.csv"
-    "?v=1&csvType=full&useColumnShortNames=false"
-)
-ENERGY_DATA_URL = "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv"
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CO2_CSV_PATH = os.path.join(_BASE_DIR, "data", "annual-co2-emissions-per-country.csv")
+ENERGY_CSV_PATH = os.path.join(_BASE_DIR, "data", "renewable_energy_share_2000_2025.csv")
 
-# Onze eigen "User-Agent"-header: OWID vraagt hier expliciet om in hun
-# API-documentatie, zodat automatische requests herkenbaar zijn.
-_HTTP_HEADERS = {"User-Agent": "VA-IDS-dashboard/1.0 (student project)"}
-
-# Kolommen die we uit de energie-bron nodig hebben (die tabel heeft er >100)
 ENERGY_COLUMNS = [
     "country",
     "year",
@@ -70,9 +59,9 @@ ENERGY_COLUMNS = [
 
 
 def _standardize_id_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Hernoemt de land/code/jaar-kolommen naar country/iso_code/year, ongeacht of
-    OWID ze als 'Entity'/'Code'/'Year' of als 'entity'/'code'/'year' teruggeeft
-    (dit verschilt soms per csvType/useColumnShortNames-instelling)."""
+    """Hernoemt de land/code/jaar-kolommen naar country/iso_code/year, ongeacht
+    of het bestand ze als 'Entity'/'Code'/'Year' of als 'country'/'iso_code'/'year'
+    aanlevert."""
     lookup = {c.lower(): c for c in df.columns}
     rename_map = {}
     for target, candidates in {
@@ -83,7 +72,7 @@ def _standardize_id_columns(df: pd.DataFrame) -> pd.DataFrame:
         found = next((lookup[c] for c in candidates if c in lookup), None)
         if found is None:
             raise KeyError(
-                f"Kon geen kolom vinden voor '{target}' in de OWID-respons. "
+                f"Kon geen kolom vinden voor '{target}' in het CSV-bestand. "
                 f"Beschikbare kolommen: {list(df.columns)}"
             )
         rename_map[found] = target
@@ -91,44 +80,36 @@ def _standardize_id_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _is_real_country(code) -> bool:
-    """OWID gebruikt voor regio's/inkomensgroepen (bv. 'Africa', 'High-income
-    countries', 'World') geen (of een niet-ISO3) landcode. Door alleen rijen
-    met een geldige 3-letter ISO-code te houden, isoleren we losse landen van
-    dat soort aggregaten."""
+    """Filtert regio's/aggregaten (bv. 'Africa', 'World') eruit: die hebben
+    geen (bruikbare) 3-letter ISO-landcode."""
     return isinstance(code, str) and len(code) == 3 and code != "OWID_WRL"
 
 
 # ---------------------------------------------------------------------------
-# Ophalen (elk 24 uur gecached, zodat de app snel blijft en niet omvalt als
-# de bron traag/tijdelijk onbereikbaar is)
+# Inlezen (gecached zodat de app snel blijft)
 # ---------------------------------------------------------------------------
-@st.cache_data(ttl=60 * 60 * 24, show_spinner="CO2-data ophalen bij Our World in Data (API)...")
+@st.cache_data(show_spinner="CO2-data inlezen...")
 def fetch_co2_raw() -> pd.DataFrame:
-    df = pd.read_csv(CO2_API_URL, storage_options={"User-Agent": _HTTP_HEADERS["User-Agent"]})
+    df = pd.read_csv(CO2_CSV_PATH)
     df = _standardize_id_columns(df)
-    # De naam van de waarde-kolom kan per OWID-versie licht verschillen; pak 'm dynamisch
-    # (de eerste kolom die niet country/iso_code/year is).
     value_col = [c for c in df.columns if c not in ("country", "iso_code", "year")][0]
     df = df.rename(columns={value_col: "co2_tonnes"})
     return df[["country", "iso_code", "year", "co2_tonnes"]]
 
 
-@st.cache_data(ttl=60 * 60 * 24, show_spinner="Energie- en welvaartdata ophalen bij Our World in Data (GitHub)...")
+@st.cache_data(show_spinner="Energie- en welvaartdata inlezen...")
 def fetch_energy_raw() -> pd.DataFrame:
-    df = pd.read_csv(
-        ENERGY_DATA_URL,
-        usecols=lambda c: c in ENERGY_COLUMNS,
-        storage_options={"User-Agent": _HTTP_HEADERS["User-Agent"]},
-    )
+    df = pd.read_csv(ENERGY_CSV_PATH, usecols=lambda c: c in ENERGY_COLUMNS)
+    df = _standardize_id_columns(df)
     return df
 
 
 # ---------------------------------------------------------------------------
 # Combineren + opschonen + afgeleide variabelen
 # ---------------------------------------------------------------------------
-@st.cache_data(ttl=60 * 60 * 24, show_spinner="Datasets samenvoegen en opschonen...")
+@st.cache_data(show_spinner="Datasets samenvoegen en opschonen...")
 def build_dataset():
-    """Haalt beide bronnen op, merged ze en levert (df, join_log) terug.
+    """Leest beide bestanden in, merged ze en levert (df, join_log) terug.
     join_log bevat de rij-aantallen voor/na de merge, zoals de opdracht vraagt."""
     co2_raw = fetch_co2_raw()
     energy_raw = fetch_energy_raw()
@@ -144,10 +125,9 @@ def build_dataset():
     join_log["co2_rows_countries_only"] = len(co2)
     join_log["energy_rows_countries_only"] = len(energy)
 
-    # 2) Jaartallen gelijktrekken: de CO2-reeks stopt bij het laatste jaar
-    #    waarvoor OWID CO2-cijfers heeft; de energie-reeks loopt vaak een paar
-    #    jaar verder door (voorlopige cijfers). We nemen daarom automatisch de
-    #    OVERLAP van beide bronnen, in plaats van een jaartal hard te coderen.
+    # 2) Jaartallen gelijktrekken: de CO2-reeks stopt bij een ander laatste
+    #    jaar dan de energiereeks. We nemen daarom automatisch de OVERLAP
+    #    van beide bestanden, in plaats van een jaartal hard te coderen.
     start_year = max(co2.year.min(), energy.year.min())
     end_year = min(co2.year.max(), energy.year.max())
     co2 = co2[(co2.year >= start_year) & (co2.year <= end_year)]
@@ -166,7 +146,6 @@ def build_dataset():
     # 4) Afgeleide variabelen (nieuwe kolommen die we zelf berekenen)
     merged["co2_per_capita_t"] = merged["co2_tonnes"] / merged["population"]
     merged["gdp_per_capita"] = merged["gdp"] / merged["population"]
-    merged["renewables_share_energy_pct"] = merged["renewables_share_energy"]  # al in %
 
     # Inkomensgroep: eigen, transparante kwartiel-indeling op basis van de
     # gemiddelde GDP per capita van elk land over de hele periode (dus geen

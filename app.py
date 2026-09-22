@@ -8,9 +8,7 @@ Onderzoeksvraag: In hoeverre komt de transitie naar hernieuwbare energie
 daadwerkelijk tot uiting in dalende CO2-uitstoot, en hoe verhoudt dit zich
 tot het inkomensniveau van landen?
 
-Databronnen (zie data_loader.py voor de exacte endpoints):
-  1. Our World in Data Chart API   -> CO2-uitstoot per land per jaar
-  2. OWID Energy dataset (GitHub)  -> hernieuwbaar-aandeel, GDP, bevolking
+Databronnen: de twee aangeleverde CSV-bestanden in de map data/ (zie data_loader.py).
 
 Overgenomen/geïnspireerde code:
   - Plotly Express choropleth-voorbeeld uit de officiële Plotly-documentatie
@@ -94,11 +92,11 @@ with tab_data:
     st.subheader("Hoe is deze dataset opgebouwd?")
     st.markdown(
         """
-        Twee **afzonderlijke** bronnen worden in dit script (niet met de hand) opgehaald en
+        Twee **afzonderlijke** bestanden worden op schijf (map `data/`) ingelezen en
         samengevoegd op de sleutel **`iso_code` + `year`** (landcode + jaartal):
 
-        1. **CO2-uitstoot** — Our World in Data Chart API (Global Carbon Project-cijfers, 1750–heden)
-        2. **Hernieuwbare energie, GDP & bevolking** — het OWID *Energy dataset* op GitHub (2000–heden)
+        1. **CO2-uitstoot** — `annual-co2-emissions-per-country.csv` (Global Carbon Project-cijfers)
+        2. **Hernieuwbare energie, GDP & bevolking** — `renewable_energy_share_2000_2025.csv`
         """
     )
 
@@ -118,7 +116,7 @@ with tab_data:
         - De CO2-reeks loopt tot **{year_max}**, de energiereeks vaak nog een paar jaar verder
           (voorlopige cijfers). De jaartallen zijn daarom **automatisch gelijkgetrokken** op de
           overlap van beide bronnen: **{join_log['common_year_range'][0]}–{join_log['common_year_range'][1]}**,
-          in plaats van een jaartal hard te coderen — als OWID de data bijwerkt, past de app zich vanzelf aan.
+          in plaats van een jaartal hard te coderen.
         - Na het combineren op `iso_code + year` blijven **{join_log['merged_rows']:,} rijen** over
           (landen × jaren waarvoor **beide** bronnen een waarde hebben). Er gaan dus rijen "verloren"
           wanneer een land in slechts één van de twee bronnen voorkomt voor een bepaald jaar — dat is

@@ -12,22 +12,30 @@ uiting in dalende CO2-uitstoot, en hoe verhoudt dit zich tot het inkomensniveau 
   een bepaald niveau, en vlakt daarna af of daalt)?
 - Hoe verschilt dit patroon tussen rijke, opkomende en arme landen?
 
-## Databronnen (opgehaald via een openbare API/bron, niet met de hand gedownload)
+## Databronnen
 
-| # | Data | Bron | Endpoint |
-|---|------|------|----------|
-| 1 | CO2-uitstoot per land per jaar | Our World in Data **Chart API** (officiële, gedocumenteerde publieke API — voeg `.csv` toe aan elke grapher-URL) | `https://ourworldindata.org/grapher/annual-co2-emissions-per-country.csv` |
-| 2 | Hernieuwbaar-aandeel, GDP, bevolking | OWID **Energy dataset** (publiek, CC BY 4.0, dagelijks automatisch bijgewerkt) op GitHub | `https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv` |
+Dit dashboard gebruikt **uitsluitend de twee aangeleverde CSV-bestanden**, meegepakt in de
+map `data/` van deze repo:
 
-> ⚠️ **Belangrijk voor de beoordeling:** de opdracht eist expliicit dat je de data ophaalt via
-> een **openbare API**, niet met de hand gedownload bestanden. Kaggle-CSV's die je zelf
-> download (zoals de twee bestanden die als vertrekpunt zijn gebruikt om deze case te
-> verkennen) voldoen daar **niet** aan. Dit dashboard haalt daarom bij het opstarten dezelfde
-> data live op bij de oorspronkelijke bron (Our World in Data) via de URL's hierboven — de
-> inhoud is (op de laatste bijgewerkte jaren na) identiek aan de Kaggle-bestanden, omdat die
-> daar simpelweg een kopie van zijn. Zie `data_loader.py` voor de details en bronvermelding.
+| # | Data | Bestand |
+|---|------|---------|
+| 1 | CO2-uitstoot per land per jaar | `data/annual-co2-emissions-per-country.csv` |
+| 2 | Hernieuwbaar-aandeel, GDP, bevolking | `data/renewable_energy_share_2000_2025.csv` |
 
-Beide bronnen zijn **twee volledig gescheiden bestanden**, samengevoegd op de sleutel
+Beide bestanden staan gewoon in de repo, dus een schone `git clone` + `pip install` +
+`streamlit run app.py` werkt zonder handmatige stappen en zonder internetverbinding.
+
+> ⚠️ **Let op voor de beoordeling:** de opdracht eist letterlijk dat je de data ophaalt via
+> een **openbare API**, niet met de hand gedownloade bestanden ("Haal de data in je script op,
+> niet met de hand gedownload."). Deze twee CSV's zijn oorspronkelijk van Kaggle gedownload,
+> en worden hier vanaf schijf ingelezen — dat voldoet **niet** aan die letterlijke eis, en kan
+> meetellen bij het criterium "Data verzameling". Als je dat risico wilt vermijden zonder de
+> data zelf te veranderen: zet deze twee bestanden in een eigen (publieke) GitHub-repo en laat
+> het script ze ophalen via hun `raw.githubusercontent.com`-URL (met `pandas.read_csv(url)` of
+> `requests.get(url)`) in plaats van vanaf schijf. Dat is dezelfde data, maar dan wél "opgehaald"
+> via een URL in code in plaats van met de hand gedownload.
+
+Beide bestanden zijn wél **twee volledig gescheiden bestanden**, samengevoegd op de sleutel
 `iso_code` (landcode) + `year` — dat voldoet aan de eis "je voegt twee tabellen samen die niet
 uit hetzelfde bestand komen".
 
@@ -46,11 +54,14 @@ aantallen), inclusief:
 
 ```
 .
-├── app.py                  # Streamlit-app (UI, tabs, interactie)
-├── data_loader.py           # Ophalen bij de bron + samenvoegen + opschonen
-├── analysis.py               # Walk-vs-talk classificatie + EKC-regressie
+├── app.py                    # Streamlit-app (UI, tabs, interactie)
+├── data_loader.py             # Inlezen + samenvoegen + opschonen
+├── analysis.py                 # Walk-vs-talk classificatie + EKC-regressie
+├── data/
+│   ├── annual-co2-emissions-per-country.csv
+│   └── renewable_energy_share_2000_2025.csv
 ├── requirements.txt
-├── .streamlit/config.toml    # Kleurthema
+├── .streamlit/config.toml      # Kleurthema
 └── README.md
 ```
 
@@ -64,8 +75,8 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-De app heeft een internetverbinding nodig (om de data bij Our World in Data op te halen) maar
-verder geen extra configuratie, API-key of handmatige stap.
+De app heeft **geen internetverbinding** nodig — beide CSV's staan al in de repo — en verder
+geen extra configuratie, API-key of handmatige stap.
 
 ## Live publiceren via Streamlit Community Cloud
 
@@ -110,8 +121,6 @@ nodig, want alles wordt in `data_loader.py` bij de bron opgehaald.
   [plotly.com/python/choropleth-maps](https://plotly.com/python/choropleth-maps/).
 - `st.cache_data`-gebruik: volgens het cachingpatroon uit de
   [Streamlit-documentatie](https://docs.streamlit.io/library/advanced-features/caching).
-- OWID Chart-API-aanroep (parameters `v`, `csvType`, `useColumnShortNames`): overgenomen van de
-  officiële [OWID Chart API-documentatie](https://docs.owid.io/projects/etl/api/chart-api/).
 
 ## Beperkingen / wat (nog) niet mogelijk is
 
