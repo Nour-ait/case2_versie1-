@@ -1,4 +1,3 @@
-Hier is een zeer uitgebreide, academische en gedetailleerde documentatie van het project. Dit document kun je rechtstreeks overnemen als **`DOCUMENTATIE.md`** op GitHub, opnemen in een projectverslag of gebruiken als volledige voorbereiding op het eindgesprek/presentatie.
 
 ---
 
